@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShashiHook</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🪝</text></svg>">
+</head>
+<body>
+<div class="app">
+
+  <div class="titlebar">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+    </div>
+    <div class="brand">
+      <h1>ShashiHook</h1>
+      <span class="by">engine <span class="engine">ArnosAI</span></span>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill" id="pill-engine"><span class="dot off" id="dot-engine"></span><span id="engine-txt">starting…</span></span>
+    <span class="pill" id="pill-llm" style="display:none"><span class="dot off" id="dot-llm"></span><span id="llm-txt">llm</span></span>
+    <span class="pill" id="pill-mailbox"><span class="dot off" id="dot-mailbox"></span><span id="mailbox-txt">mailbox</span></span>
+    <button class="icon-btn" id="theme" title="Toggle theme">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="toolbar">
+    <div class="field">
+      <label for="mailbox">Mailbox</label>
+      <select id="mailbox">
+        <option value="INBOX">INBOX</option>
+        <option value="[Gmail]/Spam">Spam</option>
+        <option value="[Gmail]/All Mail">All Mail</option>
+        <option value="[Gmail]/Important">Important</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="query">Query</label>
+      <input id="query" value="newer_than:30d" placeholder="newer_than:7d">
+    </div>
+    <div class="field">
+      <label for="limit">Limit</label>
+      <input id="limit" type="number" value="40" min="1" max="500">
+    </div>
+    <button class="btn" id="scan">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+      </svg>
+      <span id="scan-label">Scan mailbox</span>
+    </button>
+    <button class="btn ghost" id="stop" disabled>Stop</button>
+    <div class="spacer"></div>
+    <button class="btn ghost" id="sort">Sort: severity</button>
+  </div>
+
+  <div class="progress"><i id="bar"></i></div>
+
+  <div class="stats" id="stats">
+    <div class="stat"><div class="v" id="s-scanned">0</div><div class="k">Scanned</div></div>
+    <div class="stat"><div class="v" id="s-flagged">0</div><div class="k">Flagged</div></div>
+    <div class="stat" data-band="CRITICAL"><div class="v" id="s-CRITICAL">0</div><div class="k">Critical</div></div>
+    <div class="stat" data-band="HIGH"><div class="v" id="s-HIGH">0</div><div class="k">High</div></div>
+    <div class="stat" data-band="MEDIUM"><div class="v" id="s-MEDIUM">0</div><div class="k">Medium</div></div>
+    <div class="stat" data-band="LOW"><div class="v" id="s-LOW">0</div><div class="k">Low</div></div>
+    <div class="stat" data-band="INFORMATIONAL"><div class="v" id="s-INFORMATIONAL">0</div><div class="k">Clean</div></div>
+  </div>
+
+  <div class="main" id="main">
+    <div class="feed-wrap">
+      <div class="feed-head">
+        <span id="feed-status">Ready</span>
+        <div class="spacer"></div>
+        <span id="feed-count"></span>
+      </div>
+      <div class="feed" id="feed">
+        <div class="empty" id="empty">
+          <h3>Nothing scanned yet</h3>
+          <p>Press <strong>Scan mailbox</strong>. ArnosAI scores each message as it
+             arrives — threat severity, attack vector, and the evidence behind the
+             number. Click any row to see why it was scored that way.</p>
+        </div>
+      </div>
+    </div>
+    <aside class="detail" id="detail"></aside>
+  </div>
+
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

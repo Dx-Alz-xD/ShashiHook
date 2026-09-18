@@ -1,0 +1,307 @@
+{
+  "schema": "sentinel.incident.v1",
+  "generated_at": "2026-09-18T05:34:15.044861+00:00",
+  "message": {
+    "id": "e68eea2bd745594e",
+    "subject": "Re: Confidential",
+    "sender": "\"Mark Hale\" <m.hale@acrne-corp.com>",
+    "recipient": "finance@acme.com",
+    "date": "Wed, 10 Sep 2025 11:02:00 +0000"
+  },
+  "verdict": {
+    "label": "MALICIOUS",
+    "probability_malicious": 0.88,
+    "severity_score": 68.3,
+    "severity_band": "MEDIUM",
+    "recommended_posture": "Queue for analyst review this shift. Quarantine pending a decision.",
+    "decided_by": "deterministic rule",
+    "model_probability": 0.013699,
+    "deterministic_floors": [
+      {
+        "rule": "bec_triad",
+        "minimum_confidence": 0.88,
+        "reason": "combines a payment instruction, a demand for secrecy and executive or time pressure -- the standard BEC structure",
+        "binding": true
+      }
+    ]
+  },
+  "attack_vector": {
+    "key": "bec_payment_fraud",
+    "name": "Business Email Compromise / payment fraud",
+    "description": "Impersonates an executive, supplier or internal finance contact to redirect a payment, payroll deposit or gift-card purchase. Usually carries no link or attachment, which defeats URL and sandbox controls.",
+    "confidence": 0.9,
+    "resolved_by": "floor `bec_triad`",
+    "mitre_attack": [
+      "T1566.002",
+      "T1534",
+      "T1656"
+    ],
+    "kill_chain_phase": "delivery"
+  },
+  "severity_breakdown": {
+    "formula": "100 x intent x (0.5 x impact + 0.3 x exploitability + 0.2 x targeting) + escalators",
+    "substituted": "100 x 0.880 x (0.5 x 1.00 + 0.3 x 0.25 + 0.2 x 0.55) = 60.3  + 8 (thread hijack)  = 68.3",
+    "intent": 0.88,
+    "intent_source": "deterministic_floor",
+    "impact": 1.0,
+    "exploitability": 0.25,
+    "targeting": 0.55,
+    "base_score": 60.3,
+    "exploitability_signals": [
+      {
+        "signal": "lex_payment_count",
+        "weight": 0.25,
+        "reason": "gives a concrete payment or banking instruction"
+      }
+    ],
+    "targeting_signals": [
+      {
+        "signal": "txt_thread_hijack_marker",
+        "weight": 0.3,
+        "reason": "appears inside an existing conversation"
+      },
+      {
+        "signal": "txt_subject_is_reply",
+        "weight": 0.1,
+        "reason": "is framed as a reply rather than a cold approach"
+      },
+      {
+        "signal": "lex_secrecy_count",
+        "weight": 0.15,
+        "reason": "asks the recipient to keep the request off the record"
+      }
+    ],
+    "escalators": [
+      {
+        "name": "thread hijack",
+        "points": 8.0,
+        "reason": "injected into what looks like an existing thread, which borrows the trust of the real correspondents"
+      }
+    ]
+  },
+  "model_attribution": {
+    "structural_logit": -2.9893,
+    "wording_logit": -2.5017,
+    "blend_weights": {
+      "structural": 0.2882,
+      "wording": 1.5843,
+      "intercept": 0.0625
+    },
+    "share_of_verdict": {
+      "structural": 0.1786,
+      "wording": 0.8214
+    },
+    "shap_additivity_error": 2.92e-10,
+    "shap_base_value": 0.093
+  },
+  "why_flagged": {
+    "raising": [
+      {
+        "feature": "lex_secrecy_rate",
+        "claim": "Density of demand for secrecy in the body",
+        "detail": "1 match in 40 words",
+        "shap_log_odds": 1.5378,
+        "evidence": [
+          "…and I need a wire transfer processed today. Keep this between us until the announcement. I will send the bene…"
+        ],
+        "kind": "indicator"
+      },
+      {
+        "feature": "lex_reward_rate",
+        "claim": "Density of promise of money or a prize in the body",
+        "detail": "1 match in 40 words",
+        "shap_log_odds": 1.3252,
+        "evidence": [
+          "…n us until the announcement. I will send the beneficiary account details shortly. This is time-sensit…"
+        ],
+        "kind": "indicator"
+      },
+      {
+        "feature": "lex_payment_rate",
+        "claim": "Density of payment or banking instruction in the body",
+        "detail": "2 matches in 40 words",
+        "shap_log_odds": 0.9376,
+        "evidence": [
+          "…e are finalising an acquisition and I need a wire transfer processed today. Keep this between us until…",
+          "…n us until the announcement. I will send the beneficiary account details shortly. This is time-sensitive."
+        ],
+        "kind": "indicator"
+      },
+      {
+        "feature": "lex_urgency_rate",
+        "claim": "Density of time pressure in the body",
+        "detail": "1 match in 40 words",
+        "shap_log_odds": 0.5988,
+        "evidence": [
+          "…beneficiary account details shortly. This is time-sensitive."
+        ],
+        "kind": "indicator"
+      },
+      {
+        "feature": "lex_reward_count",
+        "claim": "Promise of money or a prize in the body",
+        "detail": "1 match",
+        "shap_log_odds": 0.0986,
+        "evidence": [
+          "…n us until the announcement. I will send the beneficiary account details shortly. This is time-sensit…"
+        ],
+        "kind": "indicator"
+      },
+      {
+        "feature": "lex_payment_count",
+        "claim": "Payment or banking instruction in the body",
+        "detail": "2 matches",
+        "shap_log_odds": 0.0957,
+        "evidence": [
+          "…e are finalising an acquisition and I need a wire transfer processed today. Keep this between us until…",
+          "…n us until the announcement. I will send the beneficiary account details shortly. This is time-sensitive."
+        ],
+        "kind": "indicator"
+      },
+      {
+        "feature": "lex_secrecy_count",
+        "claim": "Demand for secrecy in the body",
+        "detail": "1 match",
+        "shap_log_odds": 0.0765,
+        "evidence": [
+          "…and I need a wire transfer processed today. Keep this between us until the announcement. I will send the bene…"
+        ],
+        "kind": "indicator"
+      },
+      {
+        "feature": "lex_urgency_count",
+        "claim": "Time pressure in the body",
+        "detail": "1 match",
+        "shap_log_odds": 0.0634,
+        "evidence": [
+          "…beneficiary account details shortly. This is time-sensitive."
+        ],
+        "kind": "indicator"
+      },
+      {
+        "feature": "txt_unique_word_ratio",
+        "claim": "Vocabulary variety raised the score",
+        "detail": "observed value: 0.925",
+        "shap_log_odds": 0.5084,
+        "evidence": [],
+        "kind": "statistical"
+      }
+    ],
+    "lowering": [
+      {
+        "feature": "txt_thread_hijack_marker",
+        "claim": "Quoted material suggesting an existing thread lowered the score",
+        "detail": "observed value: 1",
+        "shap_log_odds": -4.5046,
+        "evidence": [],
+        "kind": "indicator"
+      },
+      {
+        "feature": "txt_subject_is_reply",
+        "claim": "Subject formatted as a reply or forward lowered the score",
+        "detail": "observed value: 1",
+        "shap_log_odds": -2.4019,
+        "evidence": [],
+        "kind": "indicator"
+      },
+      {
+        "feature": "txt_subject_words",
+        "claim": "Number of words in the subject lowered the score",
+        "detail": "observed value: 2",
+        "shap_log_odds": -0.3736,
+        "evidence": [],
+        "kind": "statistical"
+      },
+      {
+        "feature": "txt_intraword_punct_rate",
+        "claim": "Punctuation inserted inside words to break up keywords lowered the score",
+        "detail": "observed value: 0.025",
+        "shap_log_odds": -0.324,
+        "evidence": [],
+        "kind": "statistical"
+      }
+    ],
+    "wording_signal": "Phrasing most associated with hostile mail in the training corpus: \"transfer\", \"we are\", \"beneficiary\", \"account\", \"the beneficiary\", \"details\".",
+    "top_tokens": [
+      {
+        "token": "transfer",
+        "log_odds": 0.1244
+      },
+      {
+        "token": "us",
+        "log_odds": 0.0997
+      },
+      {
+        "token": "we are",
+        "log_odds": 0.0852
+      },
+      {
+        "token": "beneficiary",
+        "log_odds": 0.0801
+      },
+      {
+        "token": "account",
+        "log_odds": 0.0641
+      },
+      {
+        "token": "we",
+        "log_odds": 0.0463
+      },
+      {
+        "token": "the beneficiary",
+        "log_odds": 0.0454
+      },
+      {
+        "token": "details",
+        "log_odds": 0.0437
+      },
+      {
+        "token": "us ",
+        "log_odds": 0.0414
+      },
+      {
+        "token": "nsf",
+        "log_odds": 0.0401
+      }
+    ],
+    "counterfactuals": [
+      "Ignoring the wording entirely and judging on structure alone, confidence would be 30.8% instead of 1.4%."
+    ]
+  },
+  "rules_fired": [
+    {
+      "rule": "lf_bec_payment",
+      "votes_for": "bec_payment_fraud",
+      "weight": 2.4,
+      "reason": "short, linkless payment request carrying executive authority or secrecy framing"
+    }
+  ],
+  "indicators": {
+    "sender_address": [
+      "m.hale@acrne-corp.com"
+    ],
+    "sender_domain": [
+      "acrne-corp.com"
+    ],
+    "urls": [],
+    "url_domains": [],
+    "attachments": [],
+    "dangerous_files": []
+  },
+  "sender_analysis": {
+    "display_name": "Mark Hale",
+    "address": "m.hale@acrne-corp.com",
+    "registrable_domain": "acrne-corp.com",
+    "claimed_brand": null,
+    "brand_mismatch": false,
+    "lookalike_of": null,
+    "is_freemail": false,
+    "notes": []
+  },
+  "link_analysis": [],
+  "response_plan": [
+    "Freeze any outbound payment referencing this thread and confirm the request by a phone number already on file — never one from the email.",
+    "Search the mail estate for other messages from the same sender or reply-to address in the last 30 days.",
+    "Check whether the spoofed executive's real mailbox shows a new forwarding rule or unfamiliar sign-in."
+  ]
+}

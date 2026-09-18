@@ -1,0 +1,17 @@
+.venv/
+artifacts/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+DS_Store
+eval/gold_set_*.csv
+
+# secrets and real mail — never commit
+.env
+.gmail_token.json
+reports/
+intel/
+artifacts/local_ham.parquet
+data/nazario/
+.env
