@@ -268,14 +268,25 @@ LEXICONS: dict[str, list[str]] = {
         r"\bcall (?:microsoft|apple|windows|our) (?:support|technician)\b",
     ],
     "delivery_scam": [
-        r"\b(?:package|parcel|shipment|delivery) (?:is )?(?:on hold|held|pending|suspended|failed)\b",
-        r"\bunable to (?:deliver|complete delivery)\b",
-        r"\bre[- ]?schedule (?:your )?delivery\b", r"\bredelivery\b",
-        r"\b(?:customs|shipping|delivery|handling) (?:fee|charge|duty|clearance)\b",
+        # Written to tolerate inserted words. An earlier version required
+        # "unable to complete delivery" and missed "unable to complete THE
+        # delivery"; "address could not be verified" missed "address
+        # INFORMATION could not be verified"; and "delivery on hold" missed
+        # "Delivery status: On hold".
+        r"\b(?:package|parcel|shipment|delivery|item|consignment)\b[^.!?\n]{0,30}"
+        r"\b(?:on hold|held|pending|suspended|failed|could ?n[o']t be delivered)\b",
+        r"\bunable to (?:complete|make|process)\b[^.!?\n]{0,20}\bdeliver",
+        r"\bdelivery (?:attempt|status|failed|exception)\b",
+        r"\bre-?schedule\b[^.!?\n]{0,24}\bdeliver",
+        r"\bredeliver(?:y)?\b", r"\bnew delivery (?:time|date|window)\b",
+        r"\baddress\b[^.!?\n]{0,30}\b(?:could ?n[o']t be verified|incomplete|"
+        r"incorrect|invalid|not recognised|not recognized)\b",
+        r"\breturned to (?:the )?sender\b", r"\bawaiting (?:collection|delivery)\b",
+        r"\b(?:customs|shipping|delivery|handling|redelivery) (?:fee|charge|duty|clearance)\b",
         r"\bsmall (?:fee|charge) to (?:release|redeliver)\b",
-        r"\btrack(?:ing)? (?:your )?(?:package|parcel|shipment|order) (?:here|now|below)\b",
-        r"\baddress (?:is )?(?:incomplete|incorrect|could not be verified)\b",
-        r"\byour (?:order|item) (?:could not|cannot) be (?:delivered|shipped)\b",
+        r"\btrack(?:ing)? (?:your )?(?:package|parcel|shipment|order)\b",
+        r"\byour (?:order|item|package) (?:could not|cannot|was unable to) be (?:delivered|shipped)\b",
+        r"\bcourier\b", r"\bdispatch(?:ed)? (?:notice|failed)\b",
     ],
     "govt_impersonation": [
         r"\btax (?:refund|rebate|return|credit|notice|assessment)\b",
@@ -289,13 +300,29 @@ LEXICONS: dict[str, list[str]] = {
         r"\b(?:aadhaar|pan card|kyc) (?:update|verification|suspended|expired)\b",
     ],
     "charity_fraud": [
-        r"\bdonat(?:e|ion)s? (?:to|for) (?:the )?(?:victims|survivors|relief|fund)\b",
-        r"\b(?:earthquake|flood|hurricane|famine|war|refugee) (?:relief|appeal|victims|fund)\b",
-        r"\bhumanitarian (?:aid|appeal|crisis)\b",
-        r"\bevery (?:penny|cent|dollar|pound) (?:goes|helps)\b",
-        r"\bplease (?:give|donate) (?:generously|now|today)\b",
-        r"\bcharity (?:appeal|drive|campaign)\b",
-        r"\bsick (?:child|children|mother|father)\b", r"\bmedical (?:bills?|treatment) (?:fund|appeal)\b",
+        # Phrases, not words. A first version used bare "donation",
+        # "contribution", "war" and "conflict"; measured on held-out mail it
+        # fired 35 times and was wrong 34 times -- on Slashdot war coverage, an
+        # academic "call for contributions", and a farewell-gift collection.
+        # An appeal is recognisable by its structure, not its vocabulary.
+        r"\b(?:affected|impacted|displaced|devastated) by\b[^.!?\n]{0,40}"
+        r"\b(?:flood(?:ing|s)?|earthquake|hurricane|cyclone|famine|drought|"
+        r"wildfire|tsunami|disaster|crisis|conflict|war)\b",
+        r"\b(?:contribution|donation)s? of\b[^.!?\n]{0,20}[\d$£€₹]",
+        r"\b(?:your |a |each |every )?(?:contribution|donation|gift)s?\b"
+        r"[^.!?\n]{0,24}\b(?:can|will|would|help)\b[^.!?\n]{0,20}"
+        r"\b(?:help|provide|support|fund|feed|shelter|save)\b",
+        r"\b(?:disaster|emergency|humanitarian) (?:relief|response|aid|appeal|assistance)\b",
+        r"\brelief (?:fund|effort|package|campaign|operation)s?\b",
+        r"\bemergency (?:assistance|shelter|supplies|appeal|programme|program)\b",
+        r"\b(?:clean water|temporary shelter|essential medicines?|food supplies)\b",
+        r"\bevery (?:penny|cent|dollar|pound|rupee) (?:goes|helps|counts)\b",
+        r"\bplease (?:give|donate|help|support)\b[^.!?\n]{0,24}"
+        r"\b(?:generously|now|today)\b",
+        r"\b(?:charity|charitable) (?:appeal|drive|campaign)\b",
+        r"\bdonat(?:e|ion)s? (?:to|for) (?:the )?(?:victims|survivors|relief|fund|appeal)\b",
+        r"\bsick (?:child|children)\b", r"\bmedical (?:bills?|treatment) (?:fund|appeal)\b",
+        r"\bgofundme\b", r"\bfund ?raiser for\b",
     ],
     "romance": [
         r"\bmy dear(?:est)?\b", r"\bbeloved\b", r"\blooking for (?:a )?(?:serious )?relationship\b",

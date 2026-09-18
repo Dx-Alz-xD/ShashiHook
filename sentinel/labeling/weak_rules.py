@@ -257,13 +257,13 @@ def apply_lfs(email: Email, f: dict[str, float], ev: Evidence) -> list[Vote]:
 
     # ----------------------------------------------------------- delivery scam
     dlv = _lex(f, "delivery_scam")
-    if dlv >= 2:
+    if dlv >= 3:
         w_ = 2.5 if (payment >= 1 or n_urls >= 1) else 1.8
         votes.append(Vote("lf_delivery_hold", "delivery_scam", w_,
                           "claims a parcel is held pending a small fee"))
 
     # ------------------------------------------------------------ charity fraud
-    if _lex(f, "charity_fraud") >= 2:
+    if _lex(f, "charity_fraud") >= 4:
         votes.append(Vote("lf_charity_appeal", "charity_fraud", 2.0,
                           "solicits donations for a disaster or medical appeal"))
 

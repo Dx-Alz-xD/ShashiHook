@@ -103,6 +103,12 @@ def _f(feats: dict[str, float], k: str) -> float:
     return feats.get(k, 0.0)
 
 
+def _lex(feats: dict[str, float], name: str) -> float:
+    """Total hits for a lexicon, body plus subject -- same definition the
+    labelling functions use, so a threshold means the same thing in both."""
+    return _f(feats, f"lex_{name}_count") + _f(feats, f"lexsubj_{name}")
+
+
 # Linking to an executable is unambiguous in most organisations and routine in
 # a few -- software vendors, open-source projects, IT distribution lists. It is
 # the one floor here whose correctness depends on the organisation, so the
@@ -286,6 +292,35 @@ def applicable(email: Email, feats: dict[str, float], ev: Evidence,
                              f"the sending domain is only {fact.age_days} days old and "
                              f"is requesting credentials or impersonating a brand"))
 
+    # ---- pretext without an inspectable destination ------------------------
+    # Both of these were missed entirely. The shared shape: a story that
+    # demands an action, a call-to-action with nothing to inspect, and a sender
+    # that has not proved who it is. Genuine couriers and genuine charities are
+    # authenticated and link to their own domain; a lure that hides its
+    # destination has a reason to.
+    dlv = _lex(feats, "delivery_scam")
+    chr_ = _lex(feats, "charity_fraud")
+    no_inspectable_target = (_f(feats, "url_count") == 0
+                             or _f(feats, "emb_cta_without_url") > 0)
+
+    if dlv >= 3 and not authenticated and no_inspectable_target:
+        out.append(Floor("delivery_pretext_no_link", 0.80,
+                         "a failed-delivery story from an unauthenticated sender, "
+                         "with no inspectable link -- a real courier authenticates "
+                         "and links to its own tracking page"))
+    elif dlv >= 2 and not authenticated and (
+            _f(feats, "lex_payment_count") or _f(feats, "lex_money_request_count")):
+        out.append(Floor("delivery_fee_request", 0.82,
+                         "a delivery pretext asking for a fee, unauthenticated"))
+
+    if chr_ >= 4 and not authenticated and (
+            _f(feats, "lex_money_request_count") or _f(feats, "txt_currency_mentions")):
+        out.append(Floor("unverified_charity_appeal", 0.78,
+                         "a disaster or medical appeal asking for money from a "
+                         "sender that has not proved who it is -- registered "
+                         "charities authenticate their mail and link to their "
+                         "own donation page"))
+
     # ---- callback phishing -------------------------------------------------
     # The defining shape: something to ring, a reason to ring it, and nothing to
     # click. Legitimate billing mail links to an account page; it does not rely
@@ -386,6 +421,9 @@ FLOOR_VECTOR: dict[str, str] = {
     "unsolicited_money_request": "advance_fee_fraud",
     "body_sender_mismatch": "credential_phishing",
     "callback_phishing_shape": "callback_phishing",
+    "delivery_pretext_no_link": "delivery_scam",
+    "delivery_fee_request": "delivery_scam",
+    "unverified_charity_appeal": "charity_fraud",
     "brand_new_domain": "credential_phishing",
     "young_domain_credential_ask": "credential_phishing",
     "remote_access_tool_named": "tech_support_scam",

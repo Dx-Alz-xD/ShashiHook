@@ -7,7 +7,14 @@ models, rules and explainability layers in `sentinel/`.
 ./run.sh
 ```
 
-Opens on <http://127.0.0.1:8420>.
+Opens on <http://127.0.0.1:8420>, with auto-reload on changes to `sentinel/`,
+`app/` and the model files.
+
+**Auto-reload matters more than it looks.** The engine is loaded once and
+cached in the server process, so without it a retrained model or an edited rule
+is invisible to a running server — the UI keeps serving the previous verdicts
+and a fix that worked on the command line looks like it failed. Set `RELOAD=0`
+to turn it off for a stable demo.
 
 ---
 
