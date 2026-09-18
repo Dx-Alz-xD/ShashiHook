@@ -133,15 +133,52 @@ def complete(cfg: Settings, system: str, user: str) -> LLMResult:
     order = [_call_gemini, _call_groq]
     if cfg.llm_primary == "groq":
         order.reverse()
-    first_error = ""
+    errors: list[str] = []
     for fn in order:
         res = fn(cfg, system, user)
         if res.ok:
-            if first_error:
-                res.error = f"(fell back after: {first_error})"
+            if errors:
+                res.error = f"(fell back after: {'; '.join(errors)})"
             return res
-        first_error = first_error or f"{res.provider}: {res.error}"
-    return LLMResult(False, "none", error=first_error or "no provider configured")
+        errors.append(f"{res.provider}: {res.error}")
+    # Every failure, not just the first. Reporting only the primary's error hid
+    # the fallback's error completely and made a two-provider outage look like a
+    # one-provider outage.
+    return LLMResult(False, "none",
+                     error=" | ".join(errors) or "no provider configured")
+
+
+def list_models(cfg: Settings) -> dict:
+    """What each configured provider will actually serve right now.
+
+    Exists because a retired model id fails as an opaque 404 at request time.
+    `sentinel config` calls this so the problem is visible before a scan.
+    """
+    out: dict = {"gemini": [], "groq": [], "errors": []}
+    if cfg.gemini_api_key:
+        try:
+            r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
+                             params={"key": cfg.gemini_api_key}, timeout=15)
+            if r.status_code == 200:
+                out["gemini"] = [m["name"].replace("models/", "")
+                                 for m in r.json().get("models", [])
+                                 if "generateContent" in m.get("supportedGenerationMethods", [])]
+            else:
+                out["errors"].append(f"gemini list: HTTP {r.status_code}")
+        except Exception as e:
+            out["errors"].append(f"gemini list: {type(e).__name__}")
+    if cfg.groq_api_key:
+        try:
+            r = requests.get("https://api.groq.com/openai/v1/models",
+                             headers={"Authorization": f"Bearer {cfg.groq_api_key}"},
+                             timeout=15)
+            if r.status_code == 200:
+                out["groq"] = sorted(m["id"] for m in r.json().get("data", []))
+            else:
+                out["errors"].append(f"groq list: HTTP {r.status_code}")
+        except Exception as e:
+            out["errors"].append(f"groq list: {type(e).__name__}")
+    return out
 
 
 def available(cfg: Settings) -> dict:

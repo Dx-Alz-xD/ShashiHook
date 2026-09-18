@@ -38,6 +38,7 @@ async function loadStatus() {
     window.__taxonomy = s.taxonomy || {};
     window.__llm = s.llm || { any: false };
     window.__autoProfile = s.auto_profile !== false;
+    window.__profileMin = s.profile_min_score ?? 15;
     if (s.llm?.any) {
       const names = [s.llm.gemini && "Gemini", s.llm.groq && "Groq"].filter(Boolean);
       $("#pill-llm").style.display = "";
@@ -113,8 +114,7 @@ function addRow(m) {
 
   const node = rowNode(m);
   insertSorted(node, m);
-  anime({ targets: node, opacity: [0, 1], translateX: [-14, 0],
-          duration: 360, easing: "easeOutCubic" });
+  anime({ targets: node, translateX: [-14, 0], duration: 360, easing: "easeOutCubic" });
   // A finding worth attention gets a brief pulse so it is not missed while
   // dozens of clean rows stream past.
   if (m.band === "CRITICAL" || m.band === "HIGH") {
@@ -163,12 +163,48 @@ async function openDetail(id, rowNodeRef) {
     return;
   }
   renderDetail(panel, d);
-  anime({ targets: panel.querySelectorAll(".sec"), opacity: [0, 1],
-          translateY: [10, 0], delay: anime.stagger(28), duration: 330,
-          easing: "easeOutCubic" });
+  // Transform only — see architecture.js for why opacity entrances are unsafe.
+  anime({ targets: panel.querySelectorAll(".sec"), translateY: [10, 0],
+          delay: anime.stagger(28), duration: 330, easing: "easeOutCubic" });
+  if ((d.card?.score ?? 0) >= window.__profileMin) loadGraph(id);
   // Fired here, not awaited above: the deterministic analysis is already on
   // screen, and the narrative fills in beside it when the provider answers.
-  if (window.__llm?.any && window.__autoProfile) loadProfile(id);
+  if (window.__llm?.any && window.__autoProfile &&
+      (d.card?.score ?? 0) >= window.__profileMin) {
+    loadProfile(id);
+  } else if (window.__llm?.any) {
+    const slot = $("#profile-slot");
+    if (slot) {
+      slot.innerHTML = `<h3>Why this scored low</h3>
+        <p class="note">Severity ${(d.card?.score ?? 0).toFixed(1)} — below the
+        alert threshold of ${window.__profileMin}, so no attack lineage is drawn
+        and no tactics are claimed.</p>
+        <button class="btn ghost" id="profile-anyway" style="margin-top:9px">
+          Explain this verdict</button>`;
+      $("#profile-anyway")?.addEventListener("click", () => {
+        const gs = document.querySelector("#graph-sec");
+        if (gs) gs.style.display = "";
+        loadProfile(id, true);
+        loadGraph(id, true);
+      });
+    }
+  }
+}
+
+/* ---------------------------------------------------------- attack lineage */
+async function loadGraph(id, force = false) {
+  const slot = $("#graph-slot");
+  if (!slot) return;
+  slot.innerHTML = `<p class="note">Building graph…</p>`;
+  try {
+    const g = await (await fetch(
+      `/api/graph/${encodeURIComponent(id)}${force ? "?force=true" : ""}`)).json();
+    if (g.skipped) { slot.innerHTML = `<p class="note">${g.reason}</p>`; return; }
+    if (!g.nodes?.length) { slot.innerHTML = `<p class="note">No lineage to draw.</p>`; return; }
+    window.renderGraph(slot, g);
+  } catch {
+    slot.innerHTML = `<p class="note">Could not build the graph.</p>`;
+  }
 }
 
 /* --------------------------------------------------------- threat profile */
@@ -198,12 +234,50 @@ function renderProfile(slot, p, id) {
 
   if (!p.ok) {
     slot.innerHTML = `<h3>Threat profile</h3>
-      <p class="note">Unavailable — ${esc(p.error || "no provider answered")}</p>`;
+      <p class="note">${p.skipped ? esc(p.error)
+                                  : "Unavailable — " + esc(p.error || "no provider answered")}</p>
+      <button class="btn ghost" id="profile-anyway" style="margin-top:9px">
+        ${p.skipped ? "Profile it anyway" : "Retry"}</button>`;
+    $("#profile-anyway")?.addEventListener("click", () => loadProfile(id, true));
     return;
   }
-  let h = `<h3>Threat profile
+  const balanced = p.mode === "balanced";
+  let h = `<h3>${balanced ? "Why this scored low" : "Threat profile"}
       <span class="prov" title="${esc(p.model)} · ${p.latency_ms}ms">${esc(p.provider)}</span>
     </h3>`;
+  if (balanced) {
+    if (p.headline) h += `<p class="headline">${esc(p.headline)}</p>`;
+    if (p.could_look_suspicious?.length) {
+      h += `<div class="tactics">`;
+      p.could_look_suspicious.forEach((c) => {
+        h += `<div class="tactic balanced">
+          <div class="t-head"><span class="t-icon">🔍</span>
+            <span class="t-name">${esc(c.signal)}</span></div>
+          ${c.evidence ? `<div class="t-ev">“${esc(c.evidence)}”</div>` : ""}
+          ${c.why_it_looks_bad ? `<div class="t-w"><b>Could look wrong</b> ${esc(c.why_it_looks_bad)}</div>` : ""}
+          ${c.why_it_is_fine ? `<div class="t-s"><b>Why it is fine</b> ${esc(c.why_it_is_fine)}</div>` : ""}
+        </div>`;
+      });
+      h += `</div>`;
+    }
+    if (p.why_benign?.length) {
+      h += `<div style="margin-top:12px"><b class="note">Why it is benign</b>
+        <ul class="benign-list">${p.why_benign.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>`;
+    }
+    if (p.score_justification) {
+      h += `<div class="justify"><b>Why ${(window.__lastScore ?? 0).toFixed
+              ? "this score" : "this score"} is right</b>${esc(p.score_justification)}</div>`;
+    }
+    if (p.what_would_change_it) {
+      h += `<p class="note" style="margin-top:9px"><b>What would change it</b> — ${esc(p.what_would_change_it)}</p>`;
+    }
+    h += `<p class="note" style="margin-top:12px;opacity:.75">Written by ${esc(p.provider)}
+      (${esc(p.model)}). Advisory only — it does not affect the score.</p>`;
+    slot.innerHTML = h;
+    anime({ targets: slot.querySelectorAll(".tactic"), translateX: [-10, 0],
+            delay: anime.stagger(45), duration: 320, easing: "easeOutCubic" });
+    return;
+  }
   if (p.headline) h += `<p class="headline">${esc(p.headline)}</p>`;
   if (p.summary)  h += `<p class="note" style="margin-bottom:14px">${esc(p.summary)}</p>`;
 
@@ -231,9 +305,8 @@ function renderProfile(slot, p, id) {
     (${esc(p.model)}) from the evidence above. Advisory only — it does not affect
     the score, which comes from the local models and rules.</p>`;
   slot.innerHTML = h;
-  anime({ targets: slot.querySelectorAll(".tactic"), opacity: [0, 1],
-          translateX: [-10, 0], delay: anime.stagger(45), duration: 320,
-          easing: "easeOutCubic" });
+  anime({ targets: slot.querySelectorAll(".tactic"), translateX: [-10, 0],
+          delay: anime.stagger(45), duration: 320, easing: "easeOutCubic" });
 }
 
 function renderDetail(panel, d) {
@@ -296,6 +369,10 @@ function renderDetail(panel, d) {
     ${sb.exploitability_signals.length ? `<p class="note" style="margin-top:10px">${
       sb.exploitability_signals.map((s) => "+" + s.weight.toFixed(2) + " " + esc(s.reason)).join("<br>")}</p>` : ""}
   </div>`;
+
+  h += `<div class="sec"${(c.score ?? 0) < (window.__profileMin ?? 15) ? ' style="display:none" id="graph-sec"' : ''}>
+          <h3>Attack lineage</h3>
+          <div id="graph-slot"><p class="note">Building graph…</p></div></div>`;
 
   h += `<div class="sec" id="profile-slot" data-owner="${esc(c.id)}">
           ${window.__llm?.any
@@ -446,6 +523,9 @@ $("#sort").addEventListener("click", () => {
   $("#sort").textContent = `Sort: ${state.sort}`;
   rerender();
 });
+$("#playground").addEventListener("click", () => window.pgOpen());
+$("#campaigns").addEventListener("click", () => window.campOpen());
+$("#architecture").addEventListener("click", () => window.archOpen());
 $("#theme").addEventListener("click", () => {
   const root = document.documentElement;
   root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";

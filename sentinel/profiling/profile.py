@@ -20,7 +20,8 @@ from pathlib import Path
 from ..analyzer import Analysis
 from ..settings import Settings
 from . import llm
-from .prompts import SYSTEM, build_user_prompt
+from .prompts import (SYSTEM, SYSTEM_BALANCED, build_balanced_prompt,
+                      build_user_prompt)
 
 TACTIC_ICONS = {
     "authority": "👔", "urgency": "⏱", "fear": "⚠", "trust-building": "🤝",
@@ -44,14 +45,29 @@ class Tactic:
 
 
 @dataclass
+class Concern:
+    """One thing a careful reader might flag, with both readings of it."""
+    signal: str
+    evidence: str = ""
+    why_it_looks_bad: str = ""
+    why_it_is_fine: str = ""
+
+
+@dataclass
 class ThreatProfile:
     ok: bool = False
+    mode: str = "threat"          # "threat" | "balanced"
     headline: str = ""
     summary: str = ""
     tactics: list[Tactic] = field(default_factory=list)
     who_it_targets: str = ""
     if_you_engaged: list[str] = field(default_factory=list)
     legitimate_version: str = ""
+    # balanced mode only
+    could_look_suspicious: list[Concern] = field(default_factory=list)
+    why_benign: list[str] = field(default_factory=list)
+    score_justification: str = ""
+    what_would_change_it: str = ""
     provider: str = ""
     model: str = ""
     latency_ms: int = 0
@@ -61,6 +77,25 @@ class ThreatProfile:
         d = asdict(self)
         d["tactics"] = [{**asdict(t), "icon": t.icon} for t in self.tactics]
         return d
+
+
+def _reassuring_lines(a: Analysis) -> list[str]:
+    """What argued AGAINST the message being hostile. The balanced prompt needs
+    both columns or it only has material for one side of the answer."""
+    out = [f"{f.headline} ({f.contribution:+.2f})" for f in a.findings_down[:5]]
+    if a.email.auth_results and "dkim=pass" in (a.email.auth_results or "").lower():
+        out.append("sender authentication (DKIM/SPF) passed and aligned")
+    if a.history_note and "first contact" not in a.history_note:
+        out.append(f"established correspondent: {a.history_note}")
+    if a.domain_age_note and "unavailable" not in a.domain_age_note:
+        out.append(f"domain age: {a.domain_age_note}")
+    if not a.evidence.urls:
+        out.append("no links in the message")
+    if not a.evidence.attachments:
+        out.append("no attachments")
+    if not a.floors_binding:
+        out.append("no deterministic detection rule matched")
+    return out
 
 
 def _evidence_lines(a: Analysis) -> list[str]:
@@ -79,8 +114,9 @@ def _evidence_lines(a: Analysis) -> list[str]:
     return out
 
 
-def _cache_key(a: Analysis) -> str:
+def _cache_key(a: Analysis, mode: str = "threat") -> str:
     h = hashlib.sha256()
+    h.update(mode.encode())
     h.update((a.email.subject or "").encode("utf-8", "ignore"))
     h.update((a.email.body or "")[:4000].encode("utf-8", "ignore"))
     return h.hexdigest()[:20]
@@ -111,57 +147,88 @@ class ProfileCache:
             pass
 
 
+def _from_dict(hit: dict) -> ThreatProfile:
+    plain = {k: v for k, v in hit.items()
+             if k not in ("tactics", "could_look_suspicious")}
+    p = ThreatProfile(**plain)
+    p.tactics = [Tactic(**{k: v for k, v in t.items() if k != "icon"})
+                 for t in hit.get("tactics", [])]
+    p.could_look_suspicious = [Concern(**c) for c in hit.get("could_look_suspicious", [])]
+    return p
+
+
 def profile(a: Analysis, cfg: Settings, cache: ProfileCache | None = None,
             force: bool = False) -> ThreatProfile:
-    key = _cache_key(a)
+    # Below the alert threshold the question changes: not "what manipulation is
+    # this using" but "why is this fine, and what would make it not fine".
+    # Asking the threat prompt about a delivery receipt produces invented
+    # tactics, because that is what it was told to find.
+    mode = "threat" if a.severity.score >= cfg.llm_profile_min_score else "balanced"
+    key = _cache_key(a, mode)
     if cache and not force:
         hit = cache.get(key)
         if hit:
-            p = ThreatProfile(**{k: v for k, v in hit.items() if k != "tactics"})
-            p.tactics = [Tactic(**{k: v for k, v in t.items() if k != "icon"})
-                         for t in hit.get("tactics", [])]
-            return p
+            return _from_dict(hit)
 
     if not llm.available(cfg)["any"]:
-        return ThreatProfile(error="No GEMINI_API_KEY or GROQ_API_KEY configured "
+        return ThreatProfile(mode=mode,
+                             error="No GEMINI_API_KEY or GROQ_API_KEY configured "
                                    "in .env — narrative profiling is unavailable.")
 
-    user = build_user_prompt(
-        subject=a.email.subject or "", sender=a.email.sender or "",
-        body=a.evidence.body or a.email.body or "",
-        verdict=a.verdict, severity=a.severity.score, band=a.severity.band,
-        vector_name=a.vector.name, vector_description=a.vector.description,
-        evidence=_evidence_lines(a),
-    )
-    res = llm.complete(cfg, SYSTEM, user)
+    if mode == "balanced":
+        system = SYSTEM_BALANCED
+        user = build_balanced_prompt(
+            subject=a.email.subject or "", sender=a.email.sender or "",
+            body=a.evidence.body or a.email.body or "",
+            verdict=a.verdict, severity=a.severity.score, band=a.severity.band,
+            vector_name=a.vector.name, evidence=_evidence_lines(a),
+            reassuring=_reassuring_lines(a))
+    else:
+        system = SYSTEM
+        user = build_user_prompt(
+            subject=a.email.subject or "", sender=a.email.sender or "",
+            body=a.evidence.body or a.email.body or "",
+            verdict=a.verdict, severity=a.severity.score, band=a.severity.band,
+            vector_name=a.vector.name, vector_description=a.vector.description,
+            evidence=_evidence_lines(a))
+
+    res = llm.complete(cfg, system, user)
     if not res.ok:
-        return ThreatProfile(error=res.error, provider=res.provider,
+        return ThreatProfile(mode=mode, error=res.error, provider=res.provider,
                              model=res.model, latency_ms=res.latency_ms)
 
     d = res.data
-    tactics = []
-    for t in (d.get("tactics") or [])[:12]:
-        if not isinstance(t, dict) or not t.get("name"):
-            continue
-        tactics.append(Tactic(
-            name=str(t.get("name", ""))[:80],
-            category=str(t.get("category", ""))[:40],
-            evidence=str(t.get("evidence", ""))[:200],
-            how_it_works=str(t.get("how_it_works", ""))[:400],
-            how_to_spot=str(t.get("how_to_spot", ""))[:400],
-        ))
+    p = ThreatProfile(ok=True, mode=mode, provider=res.provider, model=res.model,
+                      latency_ms=res.latency_ms, error=res.error,
+                      headline=str(d.get("headline", ""))[:240])
 
-    p = ThreatProfile(
-        ok=True,
-        headline=str(d.get("headline", ""))[:240],
-        summary=str(d.get("summary", ""))[:900],
-        tactics=tactics,
-        who_it_targets=str(d.get("who_it_targets", ""))[:300],
-        if_you_engaged=[str(s)[:240] for s in (d.get("if_you_engaged") or [])[:8]],
-        legitimate_version=str(d.get("legitimate_version", ""))[:400],
-        provider=res.provider, model=res.model, latency_ms=res.latency_ms,
-        error=res.error,
-    )
+    if mode == "balanced":
+        for c in (d.get("could_look_suspicious") or [])[:8]:
+            if not isinstance(c, dict) or not c.get("signal"):
+                continue
+            p.could_look_suspicious.append(Concern(
+                signal=str(c.get("signal", ""))[:120],
+                evidence=str(c.get("evidence", ""))[:200],
+                why_it_looks_bad=str(c.get("why_it_looks_bad", ""))[:400],
+                why_it_is_fine=str(c.get("why_it_is_fine", ""))[:400]))
+        p.why_benign = [str(s)[:240] for s in (d.get("why_benign") or [])[:8]]
+        p.score_justification = str(d.get("score_justification", ""))[:600]
+        p.what_would_change_it = str(d.get("what_would_change_it", ""))[:300]
+    else:
+        p.summary = str(d.get("summary", ""))[:900]
+        for t in (d.get("tactics") or [])[:12]:
+            if not isinstance(t, dict) or not t.get("name"):
+                continue
+            p.tactics.append(Tactic(
+                name=str(t.get("name", ""))[:80],
+                category=str(t.get("category", ""))[:40],
+                evidence=str(t.get("evidence", ""))[:200],
+                how_it_works=str(t.get("how_it_works", ""))[:400],
+                how_to_spot=str(t.get("how_to_spot", ""))[:400]))
+        p.who_it_targets = str(d.get("who_it_targets", ""))[:300]
+        p.if_you_engaged = [str(s)[:240] for s in (d.get("if_you_engaged") or [])[:8]]
+        p.legitimate_version = str(d.get("legitimate_version", ""))[:400]
+
     if cache:
         cache.put(key, p.to_dict())
     return p

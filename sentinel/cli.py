@@ -60,6 +60,70 @@ def cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_watch(args: argparse.Namespace) -> int:
+    from .settings import settings
+    from .watch import run
+    if not settings.has_imap:
+        print("Watch needs IMAP. Set IMAP_USER and IMAP_APP_PASSWORD in .env.")
+        return 1
+    run(settings, interval=args.interval, min_band=args.min_band, limit=args.limit,
+        query=args.query, mailbox=args.mailbox, once=args.once)
+    return 0
+
+
+def cmd_campaigns(args: argparse.Namespace) -> int:
+    from .analyzer import ThreatAnalyzer
+    from .campaigns import cluster
+    from .ingest import imap_box
+    from .settings import settings
+    az = ThreatAnalyzer(inbox_base_rate=settings.inbox_base_rate or None)
+    print(f"Scanning {args.limit} messages from {args.mailbox}…")
+    analyses = []
+    for m in imap_box.fetch(settings, args.query, args.limit, mailbox=args.mailbox):
+        try:
+            analyses.append(az.analyze(imap_box.to_email(m)))
+        except Exception:
+            continue
+    cs = cluster(analyses, min_size=args.min_size, malicious_only=not args.all)
+    print(f"\n{len(cs)} campaign(s) across {len(analyses)} messages\n")
+    for c in cs:
+        print(f"{c.id}  ·  {c.size} messages  ·  max severity {c.max_score:.1f}")
+        print(f"   linked by : {', '.join(c.links_by) or '(single sender)'}")
+        print(f"   senders   : {', '.join(c.sender_domains[:4])}")
+        if c.link_domains:
+            print(f"   links     : {', '.join(c.link_domains[:4])}")
+        if c.phones:
+            print(f"   phones    : {', '.join(c.phones)}")
+        print(f"   vectors   : {c.vectors}")
+        for m in c.members[:5]:
+            print(f"     {m.score:5.1f} {m.band:9} {m.subject[:56]}")
+        print()
+    return 0
+
+
+def cmd_models(args: argparse.Namespace) -> int:
+    from .profiling import llm
+    from .settings import settings
+    if not llm.available(settings)["any"]:
+        print("No GEMINI_API_KEY or GROQ_API_KEY set in .env.")
+        return 1
+    info = llm.list_models(settings)
+    for prov, cur in (("gemini", settings.gemini_model), ("groq", settings.groq_model)):
+        names = info.get(prov) or []
+        if not names:
+            continue
+        ok = cur in names
+        print(f"\n{prov} — configured: {cur} "
+              f"{'OK' if ok else '** NOT AVAILABLE — pick one below **'}")
+        for n in names[:28]:
+            print(f"   {'*' if n == cur else ' '} {n}")
+        if len(names) > 28:
+            print(f"     … and {len(names)-28} more")
+    for e in info.get("errors", []):
+        print(f"  {e}")
+    return 0
+
+
 def cmd_auth(args: argparse.Namespace) -> int:
     from .ingest.gmail import authorise
     from .settings import settings
@@ -196,6 +260,28 @@ def main(argv: list[str] | None = None) -> int:
 
     c = sub.add_parser("config", help="show mailbox configuration (no secrets printed)")
     c.set_defaults(func=cmd_config)
+
+    w = sub.add_parser("watch", help="poll the mailbox and alert on new threats")
+    w.add_argument("--interval", type=int, default=300, help="seconds between polls")
+    w.add_argument("--min-band", default="MEDIUM",
+                   choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"])
+    w.add_argument("--limit", type=int, default=30)
+    w.add_argument("--query", default="newer_than:1d")
+    w.add_argument("--mailbox", default="INBOX")
+    w.add_argument("--once", action="store_true", help="one poll, then exit")
+    w.set_defaults(func=cmd_watch)
+
+    cp = sub.add_parser("campaigns", help="cluster related messages into campaigns")
+    cp.add_argument("--limit", type=int, default=150)
+    cp.add_argument("--query", default="newer_than:90d")
+    cp.add_argument("--mailbox", default="INBOX")
+    cp.add_argument("--min-size", type=int, default=2)
+    cp.add_argument("--all", action="store_true",
+                    help="cluster every message, not just malicious ones")
+    cp.set_defaults(func=cmd_campaigns)
+
+    mo = sub.add_parser("models", help="list models your LLM keys can serve")
+    mo.set_defaults(func=cmd_models)
 
     au = sub.add_parser("auth", help="one-time Gmail OAuth consent (read-only)")
     au.add_argument("--port", type=int, default=0,

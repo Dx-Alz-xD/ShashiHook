@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .actions import ActionPlan, ActionResult, MailboxActions, audit, should_action
 from .analyzer import Analysis, ThreatAnalyzer
 from .enrich.rdap import DomainAgeCache
 from .report.incident import to_json, to_markdown
@@ -29,6 +30,7 @@ SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 @dataclass
 class ScanResult:
     analyses: list[Analysis] = field(default_factory=list)
+    plan: ActionPlan = field(default_factory=ActionPlan)
     reports_written: list[Path] = field(default_factory=list)
     source: str = ""
     errors: list[str] = field(default_factory=list)
@@ -85,6 +87,11 @@ def scan(source: str = "gmail", query: str | None = None, limit: int | None = No
             result.errors.append(                      # abort the whole scan
                 f"{(e.subject or '(no subject)')[:60]}: {type(exc).__name__}: {exc}")
 
+    # Automated response. Runs after every message is scored, so the decision
+    # is made against the final verdict rather than a partial one.
+    if cfg.auto_action != "none":
+        result.plan = _run_actions(result.analyses, cfg, source)
+
     if write_reports:
         floor = BAND_RANK.get(cfg.min_band_to_report, 2)
         outdir = Path(cfg.report_dir)
@@ -101,6 +108,64 @@ def scan(source: str = "gmail", query: str | None = None, limit: int | None = No
             base.with_suffix(".json").write_text(to_json(a))
             result.reports_written.append(base.with_suffix(".md"))
     return result
+
+
+def _run_actions(analyses: list[Analysis], cfg: Settings, source: str) -> ActionPlan:
+    from .config import ARTIFACTS
+
+    plan = ActionPlan(action=cfg.auto_action, threshold=cfg.auto_action_threshold,
+                      armed=cfg.auto_action_armed,
+                      require_rule=cfg.auto_action_require_rule,
+                      quarantine_folder=cfg.quarantine_folder)
+    targets: list[tuple[Analysis, str]] = []
+    for a in analyses:
+        ok, why = should_action(a, cfg)
+        if ok:
+            targets.append((a, why))
+    if not targets:
+        return plan
+
+    log = ARTIFACTS / "action_audit.jsonl"
+    conn = None
+    try:
+        # Only open a read-write session if something will actually be done.
+        if plan.armed and source == "imap":
+            conn = MailboxActions(cfg).__enter__()
+        for a, why in targets:
+            r = ActionResult(
+                message_id=a.email.message_id or a.email.uid,
+                subject=a.email.subject or "", sender=a.evidence.sender.address or "",
+                score=a.severity.score, band=a.severity.band, vector=a.vector_key,
+                action=cfg.auto_action, dry_run=not plan.armed, reason=why)
+            uid = getattr(a.email, "provider_id", "")
+            if plan.armed and conn and uid:
+                r.error = conn.apply(uid, cfg.auto_action)
+                r.performed = not r.error
+            elif plan.armed and not uid:
+                r.error = "no provider id (Gmail API path cannot act over IMAP)"
+            plan.results.append(r)
+            audit(log, r)
+    finally:
+        if conn:
+            conn.__exit__(None, None, None)
+    return plan
+
+
+def format_actions(plan: ActionPlan) -> str:
+    if plan.action == "none" or not plan.results:
+        return ""
+    L = [""]
+    mode = "PERFORMED" if plan.armed else "DRY RUN — nothing was changed"
+    L.append(f"Automated response: {plan.action} at severity >= {plan.threshold:g}   [{mode}]")
+    for r in plan.results:
+        mark = "OK " if r.performed else ("-- " if r.dry_run else "ERR")
+        L.append(f"  {mark} {r.score:5.1f} {r.band:9} {r.vector:22} "
+                 f"{r.subject[:44]}")
+        if r.error:
+            L.append(f"      {r.error}")
+    if not plan.armed:
+        L.append("  Set SENTINEL_AUTO_ACTION_ARM=true to apply these.")
+    return "\n".join(L)
 
 
 def format_table(result: ScanResult, show: int = 40) -> str:
@@ -122,6 +187,9 @@ def format_table(result: ScanResult, show: int = 40) -> str:
              + "  ".join(f"{b}={c[b]}" for b in
                          ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL") if c[b]))
     L.append("! = verdict set by a deterministic rule, not the model")
+    act = format_actions(result.plan)
+    if act:
+        L.append(act)
     if result.errors:
         L.append(f"\n{len(result.errors)} message(s) failed to analyse:")
         L += [f"  {e}" for e in result.errors[:5]]

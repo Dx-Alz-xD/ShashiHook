@@ -19,8 +19,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import warnings
+
 import numpy as np
 import shap
+
+# shap emits this once per TreeExplainer construction. The changed return shape
+# is handled explicitly in `explain` below, so the warning is noise -- and at
+# one line per analysed message it buries real output.
+warnings.filterwarnings(
+    "ignore",
+    message="LightGBM binary classifier with TreeExplainer.*",
+    category=UserWarning,
+)
 from scipy.sparse import hstack
 
 from ..models.intent import IntentModel

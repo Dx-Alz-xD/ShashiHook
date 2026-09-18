@@ -105,6 +105,77 @@ so reopening a message costs nothing.
 
 ---
 
+## Adversarial playground
+
+The **Playground** button opens a split editor: a draft on the left, the live
+verdict on the right. Every pause in typing re-scores it.
+
+```
+plain request          12.5  INFORMATIONAL  Reconnaissance probe
++ "gift cards"         50.6  MEDIUM         BEC / payment fraud    (+38.1)
++ secrecy              53.2  MEDIUM         BEC / payment fraud     (+2.6)
+"gift cards" removed    0.3  INFORMATIONAL  Benign                 (-52.9)
+```
+
+The severity formula, the four terms, any deterministic floors and the SHAP
+bars all update together, so a change is visible in the number *and* in the
+reason for it.
+
+The point is not the animation. A detector that only ever emits a verdict is
+something you either trust or you don't. One you can push on until it moves is
+one whose shape you can actually learn — which is the same reason the balanced
+mode below exists.
+
+---
+
+## Explaining low scores
+
+Below the alert threshold, no attack lineage is drawn and no tactics are
+claimed — the graph and the profile stay hidden behind an **Explain this
+verdict** button. Drawing an "attack lineage" for a delivery receipt implies an
+attack that is not there.
+
+When asked, the profiler switches to a second prompt that answers a different
+question: not *what manipulation is this using* but *why is this fine*. It
+returns both readings of anything a careful reader might flag:
+
+> **🔍 URL shortener goo.gl hides destination**
+> **Could look wrong** Shortened links can conceal malicious URLs.
+> **Why it is fine** The sender is a known correspondent with a long history —
+> but the link is unverified and should still be checked.
+
+…then why the message is benign, why that exact score is right (citing the
+engine's own SHAP numbers), and what would have to change for it to be
+dangerous.
+
+Asking the threat prompt about clean mail produces invented tactics, because
+that is what it was told to look for. Both prompts also forbid claiming to know
+where a link leads — the model cannot follow one, and without that guard it
+asserted that a shortener "points to a known help page".
+
+---
+
+## Architecture view
+
+The **Architecture** button renders the whole pipeline — eight stages from
+ingestion to response, with the two model views side by side.
+
+Every number in it is fetched from `/api/architecture`, which reads the running
+system and the saved training metrics. Feature counts come from
+`FEATURE_NAMES`, rule names from the floors module, blend weights from the
+loaded model, the test count from pytest. **Nothing is hardcoded**, so the
+diagram cannot drift away from what the code does — which matters most in
+exactly the situation you show it to someone.
+
+It also carries two panels that a slide deck usually omits: the three
+invariants the system holds (the explained model is the deciding model; a
+language model never moves a score; nothing is permanently deleted), and a
+**"what this does not claim"** panel stating that 0.9993 is in-distribution,
+that recall on unseen phishing is 0.73, and that the model alone catches 67% of
+modern threats with rules covering the rest.
+
+---
+
 ## Controls
 
 | Control | Notes |
@@ -113,6 +184,9 @@ so reopening a message costs nothing.
 | Query | Gmail search syntax, e.g. `is:unread newer_than:2d` |
 | Limit | messages to fetch |
 | Sort | severity (default) or arrival order |
+| Playground | live adversarial editor |
+| Campaigns | messages clustered by shared infrastructure |
+| Architecture | live system diagram |
 | Theme | dark/light, follows your choice and persists |
 
 ---

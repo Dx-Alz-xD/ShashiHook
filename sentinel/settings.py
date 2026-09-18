@@ -72,14 +72,36 @@ class Settings:
     # changes no score: the verdict, severity and vector are produced by the
     # local models and rules, never by a language model.
     gemini_api_key: str = field(default_factory=lambda: _get("GEMINI_API_KEY"))
+    # Model ids churn. "gemini-flash-latest" is an alias that tracks the current
+    # flash model, which is the right default for a tool that may sit unused for
+    # months -- a pinned id silently 404s the day it is retired, which is
+    # exactly what happened to gemini-2.0-flash here.
     gemini_model: str = field(
-        default_factory=lambda: _get("GEMINI_MODEL", "gemini-2.0-flash"))
+        default_factory=lambda: _get("GEMINI_MODEL", "gemini-flash-latest"))
     groq_api_key: str = field(default_factory=lambda: _get("GROQ_API_KEY"))
     groq_model: str = field(
-        default_factory=lambda: _get("GROQ_MODEL", "llama-3.3-70b-versatile"))
+        default_factory=lambda: _get("GROQ_MODEL", "openai/gpt-oss-120b"))
     llm_primary: str = field(default_factory=lambda: _get("LLM_PRIMARY", "gemini").lower())
     llm_timeout: float = field(default_factory=lambda: float(_get("LLM_TIMEOUT", "30")))
     llm_auto_profile: bool = field(default_factory=lambda: _flag("LLM_AUTO_PROFILE", True))
+    # Only profile messages that are actually worth explaining. Writing a
+    # tactic breakdown for a GitHub notification wastes an API call and teaches
+    # the reader nothing -- there are no tactics in it to name.
+    llm_profile_min_score: float = field(
+        default_factory=lambda: float(_get("LLM_PROFILE_MIN_SCORE", "15")))
+
+    # --- automated response (the only write path; off by default) -----------
+    auto_action: str = field(default_factory=lambda: _get("SENTINEL_AUTO_ACTION", "none").lower())
+    auto_action_threshold: float = field(
+        default_factory=lambda: float(_get("SENTINEL_AUTO_ACTION_THRESHOLD", "70")))
+    # Two separate switches on purpose: choosing an action is not the same as
+    # authorising it to run unsupervised against a real mailbox.
+    auto_action_armed: bool = field(
+        default_factory=lambda: _flag("SENTINEL_AUTO_ACTION_ARM", False))
+    auto_action_require_rule: bool = field(
+        default_factory=lambda: _flag("SENTINEL_AUTO_ACTION_REQUIRE_RULE", True))
+    quarantine_folder: str = field(
+        default_factory=lambda: _get("SENTINEL_QUARANTINE_FOLDER", "ShashiHook/Quarantine"))
 
     # --- enrichment ---------------------------------------------------------
     ioc_file: str = field(default_factory=lambda: _get("SENTINEL_IOC_FILE"))
@@ -131,6 +153,11 @@ class Settings:
             f"({self.gemini_model})",
             f"  GROQ_API_KEY             {mask(self.groq_api_key)}  ({self.groq_model})",
             f"  LLM primary              {self.llm_primary}",
+            f"  auto-profile above       severity {self.llm_profile_min_score:g}",
+            f"  auto-action              {self.auto_action} at >= "
+            f"{self.auto_action_threshold:g}  "
+            f"[{'ARMED — will modify mail' if self.auto_action_armed else 'dry-run'}]"
+            f"{'  requires a rule' if self.auto_action_require_rule else ''}",
             f"  inbox base rate          {self.inbox_base_rate:.1%} "
             f"(model trained at 49%)",
         ])

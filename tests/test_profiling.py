@@ -156,3 +156,77 @@ def test_tactic_icons_resolve():
     from sentinel.profiling.profile import Tactic
     assert Tactic(name="x", category="urgency").icon == "⏱"
     assert Tactic(name="x", category="unknown-thing").icon == "•"
+
+
+# ------------------------------------------------------- balanced (low-score)
+BALANCED = {
+    "headline": "A routine newsletter that scored low",
+    "could_look_suspicious": [{"signal": "URL shortener", "evidence": "goo.gl/x",
+                               "why_it_looks_bad": "Shorteners hide destinations.",
+                               "why_it_is_fine": "Sender is authenticated; verify the link."}],
+    "why_benign": ["DKIM passed", "Known correspondent"],
+    "score_justification": "Positive signals were outweighed by authentication.",
+    "what_would_change_it": "A failed DKIM check would raise it.",
+}
+
+
+def _benign_analysis():
+    return ThreatAnalyzer(inbox_base_rate=0.02).analyze(Email(
+        subject="Weekly digest", sender='"News" <news@example.com>',
+        receiver="me@example.com",
+        body="Here is what shipped this month. Unsubscribe any time.",
+        auth_results="mx.google.com; dkim=pass header.i=@example.com; spf=pass"))
+
+
+def test_low_score_uses_the_balanced_prompt(monkeypatch):
+    """Asking 'what manipulation is this using' about a newsletter produces
+    invented tactics. Below the threshold the question has to change."""
+    seen = {}
+    def fake(cfg, system, user):
+        seen["system"] = system
+        return llm.LLMResult(True, "gemini", "m", data=BALANCED)
+    monkeypatch.setattr(llm, "complete", fake)
+    a = _benign_analysis()
+    assert a.severity.score < 15, "precondition: this should score low"
+    p = profile(a, _cfg(gemini="k"), cache=None)
+    assert p.mode == "balanced"
+    assert "explain the verdict honestly from both sides" in seen["system"]
+    assert "tactics" not in seen["system"].lower().split("shape")[0][:400]
+
+
+def test_balanced_result_carries_both_sides(monkeypatch):
+    monkeypatch.setattr(llm, "complete",
+                        lambda c, s, u: llm.LLMResult(True, "gemini", "m", data=BALANCED))
+    p = profile(_benign_analysis(), _cfg(gemini="k"), cache=None)
+    assert p.ok and p.mode == "balanced"
+    c = p.could_look_suspicious[0]
+    assert c.why_it_looks_bad and c.why_it_is_fine, "both readings are required"
+    assert p.why_benign and p.score_justification and p.what_would_change_it
+    assert not p.tactics, "balanced mode must not claim tactics"
+
+
+def test_high_score_still_uses_the_threat_prompt(monkeypatch):
+    seen = {}
+    def fake(cfg, system, user):
+        seen["system"] = system
+        return llm.LLMResult(True, "gemini", "m", data=GOOD)
+    monkeypatch.setattr(llm, "complete", fake)
+    p = profile(_analysis(), _cfg(gemini="k"), cache=None)
+    assert p.mode == "threat"
+    assert "social-engineering analyst" in seen["system"]
+
+
+def test_both_prompts_forbid_claiming_a_link_destination():
+    """The model cannot follow a URL. Without this it asserts that a shortener
+    'points to a known help page', which it has no way of knowing."""
+    from sentinel.profiling.prompts import SYSTEM, SYSTEM_BALANCED
+    for name, prompt in (("threat", SYSTEM), ("balanced", SYSTEM_BALANCED)):
+        assert "cannot follow links" in prompt, f"{name} prompt lacks the guard"
+
+
+def test_the_two_modes_cache_separately(monkeypatch, tmp_path):
+    """A message near the threshold must not serve a threat write-up from a
+    balanced cache entry, or vice versa."""
+    from sentinel.profiling.profile import _cache_key
+    a = _analysis()
+    assert _cache_key(a, "threat") != _cache_key(a, "balanced")
