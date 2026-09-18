@@ -59,16 +59,41 @@ def homoglyph_count(s: str) -> int:
     return n
 
 
+def _letter_counts(s: str) -> tuple[int, int]:
+    """(letters, uppercase letters) in a single pass.
+
+    Replaces materialising a per-character list and then walking it a second
+    time to count capitals -- on a 1.6 kB body that was two full Python-level
+    loops and a throwaway list per message.
+    """
+    n = up = 0
+    for c in s:
+        if c.isalpha():
+            n += 1
+            if c.isupper():
+                up += 1
+    return n, up
+
+
 def text_features(subject: str, body: str) -> dict[str, float]:
     subject = subject or ""
     body = body or ""
     has_html = bool(HTML_TAG_RE.search(body))
     visible = strip_html(body) if has_html else body
 
-    letters = [c for c in visible if c.isalpha()]
-    subj_letters = [c for c in subject if c.isalpha()]
+    n_letters, n_upper = _letter_counts(visible)
+    n_subj_letters, n_subj_upper = _letter_counts(subject)
     words = visible.split()
     n_words = len(words) or 1
+
+    # Zero-width characters, homoglyphs and the non-ASCII ratio are all zero by
+    # definition when the text is pure ASCII, and str.isascii() settles that in
+    # one C-level scan. Ordinary business mail takes this path, which skips
+    # three character-by-character walks -- one of which calls
+    # unicodedata.name() per character.
+    body_ascii = body.isascii()
+    visible_ascii = visible.isascii()
+    subject_ascii = subject.isascii()
 
     link_chars = sum(len(m) for m in re.findall(r"https?://\S+", body))
 
@@ -76,7 +101,7 @@ def text_features(subject: str, body: str) -> dict[str, float]:
         "txt_subject_len": float(len(subject)),
         "txt_subject_words": float(len(subject.split())),
         "txt_subject_upper_ratio": (
-            sum(c.isupper() for c in subj_letters) / len(subj_letters) if subj_letters else 0.0
+            n_subj_upper / n_subj_letters if n_subj_letters else 0.0
         ),
         "txt_subject_is_reply": float(bool(REPLY_SUBJECT_RE.match(subject))),
         "txt_subject_exclaim": float(subject.count("!")),
@@ -84,17 +109,23 @@ def text_features(subject: str, body: str) -> dict[str, float]:
         "txt_body_len": float(len(visible)),
         "txt_body_words": float(len(words)),
         "txt_body_upper_ratio": (
-            sum(c.isupper() for c in letters) / len(letters) if letters else 0.0
+            n_upper / n_letters if n_letters else 0.0
         ),
         "txt_body_exclaim_rate": float(visible.count("!") / n_words),
         "txt_body_question_rate": float(visible.count("?") / n_words),
         "txt_has_html": float(has_html),
         "txt_html_hidden_style": float(bool(HIDDEN_STYLE_RE.search(body))) if has_html else 0.0,
         "txt_html_tag_ratio": float(len(HTML_TAG_RE.findall(body)) / n_words) if has_html else 0.0,
-        "txt_zero_width_chars": float(len(ZERO_WIDTH_RE.findall(body))),
-        "txt_homoglyph_chars": float(homoglyph_count(subject + " " + visible)),
+        "txt_zero_width_chars": (
+            0.0 if body_ascii else float(len(ZERO_WIDTH_RE.findall(body)))
+        ),
+        "txt_homoglyph_chars": (
+            0.0 if (subject_ascii and visible_ascii)
+            else float(homoglyph_count(subject + " " + visible))
+        ),
         "txt_non_ascii_ratio": (
-            sum(not c.isascii() for c in visible) / len(visible) if visible else 0.0
+            0.0 if visible_ascii
+            else sum(not c.isascii() for c in visible) / len(visible)
         ),
         "txt_link_char_ratio": float(link_chars / max(len(body), 1)),
         "txt_thread_hijack_marker": float(bool(THREAD_MARKER_RE.search(body))),

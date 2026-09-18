@@ -48,6 +48,23 @@ def _levenshtein(a: str, b: str, cap: int = 3) -> int:
     return prev[-1]
 
 
+# Lookalike comparison only ever considers domains of a similar length (the
+# loop below rejects anything more than 2 characters different), so the
+# candidate set is bucketed by length once at import instead of being filtered
+# on every parse. Sorted, so a tie between two equidistant domains resolves the
+# same way on every run -- frozenset iteration order does not guarantee that.
+_LOOKALIKE_BY_LEN: dict[int, tuple[str, ...]] = {}
+
+
+def _lookalike_candidates(length: int) -> tuple[str, ...]:
+    hit = _LOOKALIKE_BY_LEN.get(length)
+    if hit is None:
+        hit = tuple(d for d in sorted(LEGIT_DOMAINS)
+                    if len(d) >= 8 and abs(len(d) - length) <= 2)
+        _LOOKALIKE_BY_LEN[length] = hit
+    return hit
+
+
 def registrable_domain(domain: str) -> str:
     """Best-effort eTLD+1 without a network call.
 
@@ -118,9 +135,7 @@ def parse_sender(raw: str | None) -> SenderProfile:
         # signal wrong 96% of the time on held-out mail. Require comparable
         # length and a distance small relative to it.
         best, best_d = None, 99
-        for legit in LEGIT_DOMAINS:
-            if len(legit) < 8 or abs(len(legit) - len(p.registrable)) > 2:
-                continue
+        for legit in _lookalike_candidates(len(p.registrable)):
             d = _levenshtein(p.registrable, legit, cap=2)
             if d < best_d:
                 best, best_d = legit, d
@@ -137,8 +152,13 @@ def parse_sender(raw: str | None) -> SenderProfile:
     return p
 
 
-def header_features(sender: str | None, receiver: str | None, date: str | None) -> dict[str, float]:
-    p = parse_sender(sender)
+def header_features(sender: str | None, receiver: str | None, date: str | None,
+                    profile: SenderProfile | None = None) -> dict[str, float]:
+    """`profile` lets a caller that has already parsed this sender hand the
+    result in. `extract` parses it for the evidence bundle either way, and
+    parsing is the most expensive step here -- it runs an edit-distance
+    comparison against every brand domain of a similar length."""
+    p = profile if profile is not None else parse_sender(sender)
     recv = (receiver or "").strip().lower()
     n_recipients = len([x for x in re.split(r"[,;]", recv) if "@" in x])
 

@@ -167,7 +167,7 @@ def extract(email: Email) -> tuple[dict[str, float], Evidence]:
     hits = lx.scan(body_text, "body") + lx.scan(subject, "subject")
 
     feats: dict[str, float] = {}
-    feats.update(header_features(email.sender, email.receiver, email.date))
+    feats.update(header_features(email.sender, email.receiver, email.date, profile=sender))
     feats.update(url_features(urls))
     feats.update(phone_features(f"{subject}\n{body_text}", phones))
     feats.update(embedded_features(embedded, len(urls)))
