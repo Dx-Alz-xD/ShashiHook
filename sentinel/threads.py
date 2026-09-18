@@ -113,9 +113,15 @@ def disable_for_corpus(reason: str = "") -> None:
     Every script that scores the corpus must call this. Training already did;
     the evaluation did not, and the false-positive rate went from 1.1% to 28.7%
     before anyone noticed.
+
+    It also clears the writing-style profiles, for the same reason and to avoid
+    repeating that mistake: anything that depends on THIS mailbox has to be
+    switched off from one place, so a new script cannot pick up half of it.
     """
-    from .features.extractor import set_thread_index
+    from .features.extractor import set_style_store, set_thread_index
+    from .stylometry import StyleStore
     set_thread_index(ThreadIndex())
+    set_style_store(StyleStore())
 
 
 def _norm_subject(s: str) -> str:

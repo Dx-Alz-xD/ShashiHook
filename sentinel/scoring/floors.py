@@ -395,7 +395,12 @@ def applicable(email: Email, feats: dict[str, float], ev: Evidence,
         # name here would also rebind it for the anchor-mismatch floor below.
         thread_peer_known = (hist.get("ever_corresponded_with_domain")
                              and hist.get("messages_from_domain", 0) >= 3)
-        if not thread_peer_known:
+        # Until the mailbox has actually been scanned there is no evidence
+        # either way, and "unknown sender" is the wrong default: it would fire
+        # on every quoted reply a new user receives, which is the 23.3% case
+        # again. An unscanned store answers first_contact=True for everyone.
+        scanned = bool(getattr(history, "messages_scanned", 0)) if history else False
+        if scanned and not thread_peer_known:
             out.append(Floor("fabricated_thread", 0.90,
                              ev.thread.note or "quotes a conversation that never happened"))
 

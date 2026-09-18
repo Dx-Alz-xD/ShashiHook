@@ -148,6 +148,117 @@ def complete(cfg: Settings, system: str, user: str) -> LLMResult:
                      error=" | ".join(errors) or "no provider configured")
 
 
+def _call_gemini_vision(cfg: Settings, system: str, user: str,
+                        images: list[tuple[str, bytes]]) -> LLMResult:
+    import base64
+    import time
+    if not cfg.gemini_api_key:
+        return LLMResult(False, "gemini", error="no API key")
+    parts: list[dict] = [{"text": user}]
+    for mime, blob in images[:6]:
+        parts.append({"inline_data": {"mime_type": mime,
+                                      "data": base64.b64encode(blob).decode()}})
+    t0 = time.time()
+    try:
+        r = requests.post(
+            GEMINI_URL.format(model=cfg.gemini_model),
+            params={"key": cfg.gemini_api_key},
+            json={
+                "systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": parts}],
+                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048,
+                                     "responseMimeType": "application/json"},
+            },
+            timeout=max(cfg.llm_timeout, 45),
+        )
+        ms = int((time.time() - t0) * 1000)
+        if r.status_code != 200:
+            return LLMResult(False, "gemini", cfg.gemini_model,
+                             error=f"HTTP {r.status_code}: {r.text[:180]}", latency_ms=ms)
+        payload = r.json()
+        text = "".join(
+            p.get("text", "")
+            for c in payload.get("candidates", [])
+            for p in c.get("content", {}).get("parts", []))
+        data = _extract_json(text)
+        if data is None:
+            return LLMResult(False, "gemini", cfg.gemini_model, raw=text[:400],
+                             error="response was not JSON", latency_ms=ms)
+        return LLMResult(True, "gemini", cfg.gemini_model, data=data, raw=text,
+                         latency_ms=ms)
+    except Exception as e:
+        return LLMResult(False, "gemini", cfg.gemini_model,
+                         error=f"{type(e).__name__}: {e}",
+                         latency_ms=int((time.time() - t0) * 1000))
+
+
+def _call_groq_vision(cfg: Settings, system: str, user: str,
+                      images: list[tuple[str, bytes]]) -> LLMResult:
+    """Groq's multimodal model, in the OpenAI content-parts shape.
+
+    Not every Groq model accepts images -- the default text model rejects the
+    request outright with "content must be a string" -- so this uses the
+    separately configured vision model.
+    """
+    import base64
+    import time
+    if not cfg.groq_api_key:
+        return LLMResult(False, "groq", error="no API key")
+    model = getattr(cfg, "groq_vision_model", "") or cfg.groq_model
+    content: list[dict] = [{"type": "text", "text": user}]
+    for mime, blob in images[:6]:
+        b64 = base64.b64encode(blob).decode()
+        content.append({"type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64}"}})
+    t0 = time.time()
+    try:
+        r = requests.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {cfg.groq_api_key}"},
+            json={"model": model, "temperature": 0.1, "max_tokens": 2048,
+                  "messages": [{"role": "system", "content": system},
+                               {"role": "user", "content": content}]},
+            timeout=max(cfg.llm_timeout, 45))
+        ms = int((time.time() - t0) * 1000)
+        if r.status_code != 200:
+            return LLMResult(False, "groq", model,
+                             error=f"HTTP {r.status_code}: {r.text[:180]}", latency_ms=ms)
+        text = r.json()["choices"][0]["message"]["content"]
+        data = _extract_json(text)
+        if data is None:
+            return LLMResult(False, "groq", model, raw=text[:400],
+                             error="response was not JSON", latency_ms=ms)
+        return LLMResult(True, "groq", model, data=data, raw=text, latency_ms=ms)
+    except Exception as e:
+        return LLMResult(False, "groq", model, error=f"{type(e).__name__}: {e}",
+                         latency_ms=int((time.time() - t0) * 1000))
+
+
+def complete_vision(cfg: Settings, system: str, user: str,
+                    images: list[tuple[str, bytes]]) -> LLMResult:
+    """Same contract as complete(), with images attached.
+
+    Both providers can see, but only with the right model: Gemini natively, and
+    Groq through `GROQ_VISION_MODEL` rather than its default text model, which
+    rejects images outright. Two providers matter more here than for text --
+    image reading is the only path to a scam that exists solely as pixels, and
+    a quota-exhausted Gemini would otherwise take the whole capability down.
+    """
+    order = [_call_gemini_vision, _call_groq_vision]
+    if cfg.llm_primary == "groq":
+        order.reverse()
+    errors: list[str] = []
+    for fn in order:
+        res = fn(cfg, system, user, images)
+        if res.ok:
+            if errors:
+                res.error = f"(fell back after: {'; '.join(errors)})"
+            return res
+        errors.append(f"{res.provider}: {res.error}")
+    return LLMResult(False, "none",
+                     error=" | ".join(errors) or "no provider configured")
+
+
 def list_models(cfg: Settings) -> dict:
     """What each configured provider will actually serve right now.
 

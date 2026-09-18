@@ -79,6 +79,15 @@ class Analysis:
     attachments: list[AttachmentFile] = field(default_factory=list)
     file_verdicts: list[FileVerdict] = field(default_factory=list)
     tracked_files: list[str] = field(default_factory=list)
+    # What language this arrived in and whether it was translated before
+    # scoring. Always present; `translated` is False for English mail.
+    language: dict = field(default_factory=dict)
+    # What was recovered from images: transcribed text and decoded QR codes.
+    vision: dict = field(default_factory=dict)
+    # Nearest labelled messages in the corpus. Shown as evidence, never fed to
+    # the model: the nearest neighbour's label is very close to the answer, so
+    # training on it would be leakage rather than learning.
+    neighbours: list = field(default_factory=list)
 
     def iocs(self) -> dict[str, list[str]]:
         """Indicators an analyst can block or hunt on immediately."""
@@ -103,7 +112,8 @@ class ThreatAnalyzer:
                  recipient: RecipientProfile | None = None,
                  breach: BreachCache | None = None,
                  virustotal: VirusTotal | None = None,
-                 file_tracker: FileTracker | None = None):
+                 file_tracker: FileTracker | None = None,
+                 settings=None):
         """`software_allowlist` exempts domains that legitimately distribute
         executables -- your own release host, an open-source project you follow.
         It is the one detection whose correctness depends on the organisation:
@@ -134,8 +144,85 @@ class ThreatAnalyzer:
         self.virustotal = virustotal
         # Registers attachments for on-disk tracking, above its own threshold.
         self.file_tracker = file_tracker
+        # Needed only to translate foreign mail; absent means that step is
+        # skipped and the message is scored in whatever language it arrived in.
+        self.settings = settings
+
+    def _to_english(self, email: Email):
+        """Translate a foreign-language message before anything reads it.
+
+        Every lexicon is English, so a Spanish scam scores near zero on wording
+        and only the structural checks still work. Translating first means one
+        pipeline covers every language instead of 26 lexicon banks per
+        language, kept in step forever.
+
+        The original body is preserved on the returned object: the reader must
+        see what actually arrived, and the stylometry and campaign layers need
+        the real text. Only the copy handed to the feature extractor changes.
+
+        Failure is not fatal. If no provider answers, the message is scored as
+        it arrived and the verdict records that the wording signal is degraded.
+        """
+        from .multilingual import LanguageVerdict, detect, translate
+        body = email.body or ""
+        v = detect(f"{email.subject or ''}\n{body}")
+        if v.is_english:
+            return email, {"verdict": v, "translated": False, "note": v.note}
+        if self.settings is None or not getattr(self.settings, "llm_translate", False):
+            return email, {"verdict": v, "translated": False,
+                           "note": f"{v.lang} detected; translation disabled, so "
+                                   f"the wording signal is unreliable here"}
+        t = translate(body, self.settings, subject=email.subject or "")
+        if not t.ok:
+            return email, {"verdict": v, "translated": False,
+                           "note": f"{v.lang} detected; translation failed "
+                                   f"({t.error}), so the wording signal is unreliable"}
+        import copy
+        scored = copy.copy(email)
+        scored.body = t.english
+        scored.html = None          # the translation is plain text
+        return scored, {"verdict": v, "translated": True, "translation": t,
+                        "original_body": body,
+                        "note": f"translated from {t.language or v.lang} by "
+                                f"{t.provider} before scoring"}
+
+    def _recover_images(self, email: Email):
+        """Pull the text and QR codes out of any pictures, before scoring.
+
+        Runs ahead of translation on purpose: a scam rendered as a picture may
+        also be in another language, and recovering the words first means the
+        translation step sees them too.
+
+        The recovered text is appended to the body rather than replacing it, so
+        a message that is half prose and half picture is scored on both. It
+        gets no special trust -- the same lexicons, URL extraction and floors
+        apply to it, which is the whole point: a QR pointing at a lookalike
+        domain now fires the rules a written link always would.
+        """
+        raw = getattr(email, "raw_message", None)
+        if raw is None:
+            return email, {"ran": False, "note": "no raw message to look inside"}
+        from .vision import inspect as inspect_images
+        cfg = self.settings
+        try:
+            v = inspect_images(raw, cfg,
+                               read_text=bool(cfg and getattr(cfg, "llm_read_images", False)))
+        except Exception as e:
+            return email, {"ran": False, "note": f"image inspection failed: {e}"}
+        if not v.images_found:
+            return email, {"ran": False, "result": v, "note": v.note}
+        recovered = v.recovered
+        if not recovered:
+            return email, {"ran": True, "result": v, "recovered": False, "note": v.note}
+        import copy
+        scored = copy.copy(email)
+        scored.body = f"{email.body or ''}\n\n{recovered}".strip()
+        return scored, {"ran": True, "result": v, "recovered": True,
+                        "note": v.note}
 
     def analyze(self, email: Email) -> Analysis:
+        email, vis = self._recover_images(email)
+        email, lang = self._to_english(email)
         feats, ev = extract(email)
         X = np.array(to_vector(feats), dtype=np.float32).reshape(1, -1)
         text = email.full_text
@@ -171,6 +258,15 @@ class ThreatAnalyzer:
                 vec_key, vec_conf, vec_src = implied, 0.9, f"floor `{by}`"
         else:
             vec_key, vec_conf, vec_src = rule_vec, rule_conf, "rule"
+
+        # Retrieval is evidence for the reader, not an input to the score. It
+        # runs after everything that decides the verdict, so a missing or
+        # corrupt index can change what is shown and never what is concluded.
+        try:
+            from .similarity import index as sim_index
+            neighbours = sim_index().search(text, k=3)
+        except Exception:
+            neighbours = []
 
         sev = severity_score(feats, ev, p, vec_key, self.known_bad_iocs,
                              recipient=self.recipient)
@@ -219,7 +315,8 @@ class ThreatAnalyzer:
             vector_source=vec_src, rule_votes=votes, explanation=bundle,
             findings_up=up, findings_down=down,
             model_probability=p_model, prior_adjusted=p_prior,
-            floors_fired=fired, floors_binding=binding,
+            floors_fired=fired, floors_binding=binding, language=lang,
+            vision=vis, neighbours=neighbours,
             counterfactuals=counterfactual_sentences(bundle),
             history_note=(self.history.describe(ev.sender.address)
                           if self.history and ev.sender.address else ""),

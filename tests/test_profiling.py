@@ -230,3 +230,69 @@ def test_the_two_modes_cache_separately(monkeypatch, tmp_path):
     from sentinel.profiling.profile import _cache_key
     a = _analysis()
     assert _cache_key(a, "threat") != _cache_key(a, "balanced")
+
+
+# ------------------------------------------------- trajectory and drill
+def _fake_llm(monkeypatch, module, payload):
+    from sentinel.profiling import llm as _llm
+    monkeypatch.setattr(module.llm, "complete",
+                        lambda *a, **k: _llm.LLMResult(
+                            True, "groq", "test-model", data=payload))
+
+
+def _analysis():
+    """A real Analysis, so the prompt builders are exercised properly."""
+    from sentinel.analyzer import ThreatAnalyzer
+    from sentinel.features.extractor import Email
+    return ThreatAnalyzer().analyze(Email(
+        subject="Action required", sender="a@b.example", receiver="me@x.com",
+        body="Verify your account within 24 hours or it will be closed."))
+
+
+def test_trajectory_drops_stageless_responses(monkeypatch):
+    """A model that returns no stages must fail loudly, not render an empty rail."""
+    from sentinel.profiling import trajectory
+    _fake_llm(monkeypatch, trajectory, {"playbook": "x", "stages": []})
+    t = trajectory.build(_analysis(), __import__("sentinel.settings",
+                                                 fromlist=["settings"]).settings)
+    assert not t.ok and "no stages" in t.error
+
+
+def test_trajectory_parses_stages(monkeypatch):
+    from sentinel.profiling import trajectory
+    _fake_llm(monkeypatch, trajectory, {
+        "playbook": "Credential harvest", "summary": "They want your login.",
+        "stages": [{"stage": 1, "title": "Fake portal", "happens": "They link you.",
+                    "ask": "your password", "tell": "the domain is wrong"}],
+        "cost_if_it_worked": "account takeover", "stop_it_here": "check the domain"})
+    t = trajectory.build(_analysis(), __import__("sentinel.settings",
+                                                 fromlist=["settings"]).settings)
+    assert t.ok and len(t.stages) == 1
+    assert t.stages[0].ask == "your password"
+
+
+def test_drill_rejects_an_out_of_range_answer(monkeypatch):
+    """An answer index past the end would mark every choice wrong.
+
+    Dropping the question is better than shipping one nobody can get right.
+    """
+    from sentinel.profiling import drill
+    _fake_llm(monkeypatch, drill, {"questions": [
+        {"q": "which?", "options": ["a", "b"], "answer": 7, "why": "because"}]})
+    d = drill.build(_analysis(), __import__("sentinel.settings",
+                                            fromlist=["settings"]).settings)
+    assert not d.ok and "no usable questions" in d.error
+
+
+def test_drill_keeps_valid_questions(monkeypatch):
+    from sentinel.profiling import drill
+    _fake_llm(monkeypatch, drill, {
+        "title": "Spot the tells",
+        "questions": [{"q": "which?", "options": ["a", "b", "c", "d"],
+                       "answer": 2, "why": "c is right"}],
+        "variations": [{"disguise": "parcel notice", "how_it_runs": "same ask"}],
+        "rule_of_thumb": "slow down"})
+    d = drill.build(_analysis(), __import__("sentinel.settings",
+                                            fromlist=["settings"]).settings)
+    assert d.ok and d.questions[0].answer == 2
+    assert d.variations[0].disguise == "parcel notice"

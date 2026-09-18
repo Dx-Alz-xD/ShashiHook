@@ -81,9 +81,21 @@ class Settings:
     groq_api_key: str = field(default_factory=lambda: _get("GROQ_API_KEY"))
     groq_model: str = field(
         default_factory=lambda: _get("GROQ_MODEL", "openai/gpt-oss-120b"))
+    # Groq's default text model cannot see. This one can, and it is what makes
+    # image reading survive a Gemini outage or quota exhaustion.
+    groq_vision_model: str = field(
+        default_factory=lambda: _get("GROQ_VISION_MODEL", "qwen/qwen3.8-27b"))
     llm_primary: str = field(default_factory=lambda: _get("LLM_PRIMARY", "gemini").lower())
     llm_timeout: float = field(default_factory=lambda: float(_get("LLM_TIMEOUT", "30")))
     llm_auto_profile: bool = field(default_factory=lambda: _flag("LLM_AUTO_PROFILE", True))
+    # Non-English mail is translated before scoring, because all 26 lexicons
+    # are English. Off costs coverage; on costs one provider call per foreign
+    # message, which detection keeps to 0.4% of English mail.
+    llm_translate: bool = field(default_factory=lambda: _flag("LLM_TRANSLATE", True))
+    # Text hidden inside images is invisible to all 52 lexicon features. QR
+    # codes are decoded locally either way; this flag governs only the model
+    # call that transcribes image text.
+    llm_read_images: bool = field(default_factory=lambda: _flag("LLM_READ_IMAGES", True))
     # Only profile messages that are actually worth explaining. Writing a
     # tactic breakdown for a GitHub notification wastes an API call and teaches
     # the reader nothing -- there are no tactics in it to name.
@@ -174,6 +186,8 @@ class Settings:
             f"({self.gemini_model})",
             f"  GROQ_API_KEY             {mask(self.groq_api_key)}  ({self.groq_model})",
             f"  LLM primary              {self.llm_primary}",
+            f"  translate foreign mail   {'enabled' if self.llm_translate else 'disabled'}",
+            f"  read text in images      {'enabled' if self.llm_read_images else 'disabled'}",
             f"  auto-profile above       severity {self.llm_profile_min_score:g}",
             f"  auto-action              {self.auto_action} at >= "
             f"{self.auto_action_threshold:g}  "

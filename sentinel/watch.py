@@ -121,6 +121,12 @@ def poll_once(az: ThreatAnalyzer, cfg: Settings, state: WatchState,
         except Exception:
             continue
         fresh.append(a)
+        # Learn this sender's writing style AFTER scoring it, never before.
+        # A message folded into the profile first would be compared against a
+        # baseline it had just helped define, so it could never look unusual --
+        # the same self-match that made the thread-verification harness read
+        # 83.5% until the index was grown in arrival order instead.
+        _learn_style(e, a)
         if BAND_RANK.get(a.severity.band, 0) >= floor:
             t, st, body = _alert(a)
             if not notify(t, st, body):
@@ -129,7 +135,41 @@ def poll_once(az: ThreatAnalyzer, cfg: Settings, state: WatchState,
             on_event(f"  ALERT {a.severity.band} {a.severity.score:.1f} "
                      f"{a.vector_key} — {(e.subject or '')[:56]}")
     state.save()
+    _save_style()
     return fresh
+
+
+def _learn_style(email, analysis) -> None:
+    """Fold a message into its sender's writing-style profile.
+
+    Skipped for anything the analyser found hostile: a profile is meant to
+    describe the real correspondent, and letting a suspected impersonation
+    teach it would move the baseline towards the attacker -- slowly training
+    the detector to accept them.
+    """
+    try:
+        if analysis.probability >= 0.5 or analysis.floors_binding:
+            return
+        from .features.extractor import strip_html, style_store
+        body = email.body or ""
+        if email.html:
+            body = strip_html(body)
+        addr = (analysis.evidence.sender.address or "").strip().lower()
+        if addr:
+            style_store().observe(addr, body)
+    except Exception:
+        pass          # profiling is advisory; it must never break a poll
+
+
+def _save_style() -> None:
+    try:
+        from .features.extractor import style_store
+        store = style_store()
+        if store.profiles:
+            store.fit_population()
+            store.save()
+    except Exception:
+        pass
 
 
 def _sweep_files(tracker: FileTracker, on_event) -> None:

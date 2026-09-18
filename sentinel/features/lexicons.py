@@ -136,7 +136,13 @@ LEXICONS: dict[str, list[str]] = {
         r"\bprize\b", r"\binherit(?:ance|ed)\b", r"\bnext of kin\b",
         r"\bbeneficiar(?:y|ies)\b", r"\bunclaimed (?:funds?|estate|money)\b",
         r"\bmillion (?:dollars|usd|pounds|euros)\b", r"\bcompensation (?:fund|payment)\b",
-        r"\bwinning notification\b", r"\bclaim your (?:prize|reward|funds?)\b",
+        r"\bwinning notification\b", 
+        # Widened from prize/reward/funds after the SMS-spam corpus flagged
+        # the claim framing. On held-out mail "to claim your/this/the" is
+        # 525 malicious against 4 benign; the narrow form caught only 31.
+        r"\bclaim your (?:prize|reward|funds?|winnings?|payment|money|cash|award)\b",
+        r"\bto claim (?:your|this|the)\b",
+        r"\bclaim\b[^.!?\n]{0,60}\b(?:within \d+|expires?|immediately)\b",
         r"\bfree (?:gift|money|cash)\b",
     ],
     "sextortion": [

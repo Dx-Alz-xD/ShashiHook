@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "shashihook",
+      "runtimeExecutable": "./run.sh",
+      "runtimeArgs": [],
+      "port": 8420
+    }
+  ]
+}

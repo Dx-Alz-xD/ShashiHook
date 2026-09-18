@@ -171,3 +171,49 @@ modern transactional mail.
 - PhishTank and OpenPhish have attribution requirements; check terms before
   redistributing feeds.
 - Never train on customer mail without explicit contractual permission.
+
+## Writing-style profiles (stylometry)
+
+`sentinel/stylometry.py` measures 125 topic-independent traits per message —
+function-word rates, punctuation rates, sentence and layout habits, greeting and
+sign-off form — and stores a running mean per sender. No message text is kept;
+`artifacts/style_profiles.json` is chmod 600.
+
+It exists for the case every header check passes: a genuine account that has
+been taken over. Real address, valid SPF and DKIM, genuine history, different
+person typing.
+
+**Measured on 362 Enron senders** (`scripts/eval_stylometry.py`), profiles built
+from 12 messages of 80+ words, scored against held-out mail from the same sender
+and from other senders:
+
+| method | mean per-sender AUC |
+|---|---|
+| cosine on corpus-normalised traits | **0.915** |
+| trimmed mean absolute z-score | 0.779 |
+| Burrows's Delta | 0.759 |
+| per-sender z-calibration | 0.918 (worse operating point) |
+
+Cosine wins because it compares the *shape* of a writer's habits and ignores how
+emphatic any single message is.
+
+Ranking well is not the same as accusing well:
+
+| threshold | accuses the real author | catches an impersonator |
+|---|---|---|
+| 1.036 | 10% | 41% |
+| 1.078 | 5% | 27% |
+| 1.152 | 1% | 9% |
+
+At a usable false-accusation rate it catches roughly one impersonation in eight.
+That is why `sty_drift` is a model feature and **not** a deterministic floor —
+telling someone their colleague is compromised is expensive to get wrong.
+
+On a real mailbox the numbers are better, because automated senders are
+templated and therefore far more consistent: across 11 senders and 620 held-out
+messages, **0.0% of genuine mail** exceeded the shipped threshold while 25.8% of
+other-sender mail did.
+
+Build profiles with `scripts/build_style_profiles.py`; the watch daemon then
+keeps them current, learning only from mail it has already cleared so that a
+suspected impersonation cannot drag the baseline towards the attacker.

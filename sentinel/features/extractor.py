@@ -20,6 +20,8 @@ from .phones import PHONE_FEATURE_NAMES, PhoneFact, extract_phones, phone_featur
 from ..enrich.urlmodel import UrlOpinion
 from ..threads import THREAD_FEATURE_NAMES, ThreadIndex, ThreadVerdict
 from ..threads import thread_features, verify as verify_thread
+from ..stylometry import (STYLE_FEATURE_NAMES, DriftResult, StyleStore,
+                          style_features)
 from .text import TEXT_FEATURE_NAMES, strip_html, text_features
 from .urls import URL_FEATURE_NAMES, UrlFact, extract_urls, url_features
 
@@ -83,6 +85,7 @@ class Evidence:
     phones: list[PhoneFact]
     embedded: EmbeddedIdentity
     thread: ThreadVerdict
+    style: DriftResult
     url_opinion: UrlOpinion
     hits: list[lx.Hit]
     attachments: list[str]
@@ -156,6 +159,7 @@ FEATURE_NAMES: tuple[str, ...] = (
     + PHONE_FEATURE_NAMES
     + EMBEDDED_FEATURE_NAMES
     + THREAD_FEATURE_NAMES
+    + STYLE_FEATURE_NAMES
     + TEXT_FEATURE_NAMES
     + ATTACHMENT_FEATURE_NAMES
     + LEXICON_FEATURE_NAMES
@@ -174,6 +178,28 @@ def thread_index() -> ThreadIndex:
     if _THREAD_INDEX is None:
         _THREAD_INDEX = ThreadIndex.load()
     return _THREAD_INDEX
+
+
+_STYLE_STORE: StyleStore | None = None
+
+
+def style_store() -> StyleStore:
+    global _STYLE_STORE
+    if _STYLE_STORE is None:
+        _STYLE_STORE = StyleStore.load()
+    return _STYLE_STORE
+
+
+def set_style_store(store: StyleStore) -> None:
+    """Override the style profiles. Corpus work MUST pass an empty store.
+
+    Same reasoning as the thread index below: corpus mail was written by people
+    this mailbox has never met, so there is no baseline to compare it against
+    and any comparison would be measuring the wrong person. An empty store
+    reports `sty_scored = 0`, which is the honest answer.
+    """
+    global _STYLE_STORE
+    _STYLE_STORE = store
 
 
 def set_thread_index(ix: ThreadIndex) -> None:
@@ -202,6 +228,7 @@ def extract(email: Email) -> tuple[dict[str, float], Evidence]:
     phones = extract_phones(f"{subject}\n{body_text}")
     embedded = analyse_embedded(body_text, sender.address)
     thread = verify_thread(email, thread_index())
+    style = style_store().compare(sender.address, body_text)
 
     hits = lx.scan(body_text, "body") + lx.scan(subject, "subject")
 
@@ -211,6 +238,7 @@ def extract(email: Email) -> tuple[dict[str, float], Evidence]:
     feats.update(phone_features(f"{subject}\n{body_text}", phones))
     feats.update(embedded_features(embedded, len(urls)))
     feats.update(thread_features(thread))
+    feats.update(style_features(style))
 
     feats.update(text_features(subject, body_raw))
 
@@ -236,6 +264,7 @@ def extract(email: Email) -> tuple[dict[str, float], Evidence]:
         phones=phones,
         embedded=embedded,
         thread=thread,
+        style=style,
         url_opinion=UrlOpinion(),
         hits=hits,
         attachments=list(email.attachments),

@@ -60,6 +60,8 @@ def engine() -> ThreatAnalyzer:
             inbox_base_rate=settings.inbox_base_rate or None,
             domain_age=DomainAgeCache(ARTIFACTS / "domain_age_cache.json",
                                       enabled=settings.enable_rdap),
+            # Enables translation of foreign-language mail before scoring.
+            settings=settings,
         )
     return _analyzer
 
@@ -109,7 +111,170 @@ def detail(a: Analysis) -> dict:
     d["tokens"] = [{"token": t.token, "weight": round(t.weight, 4)}
                    for t in a.explanation.top_tokens_up[:12]]
     d["phones"] = [{"raw": p.raw, "flags": p.flags} for p in a.evidence.phones]
+    d["style"] = _style_block(a)
+    d["thread"] = _thread_block(a)
+    d["breach"] = _breach_block(a)
+    d["files"] = _files_block(a)
+    d["recipient"] = _recipient_block(a)
+    d["language"] = _language_block(a)
+    d["vision"] = _vision_block(a)
+    d["neighbours"] = _neighbour_block(a)
     return d
+
+
+def _neighbour_block(a: Analysis) -> dict:
+    """The closest labelled messages in the corpus, as checkable evidence."""
+    from sentinel.similarity import describe
+    ns = getattr(a, "neighbours", None) or []
+    return {
+        "count": len(ns),
+        "summary": describe(ns),
+        "items": [{"similarity": n.similarity, "malicious": n.malicious,
+                   "vector": n.vector, "subject": n.subject,
+                   "sender": n.sender, "source": n.source} for n in ns],
+    }
+
+
+def _vision_block(a: Analysis) -> dict:
+    """What was recovered from pictures in the message."""
+    vis = getattr(a, "vision", None) or {}
+    v = vis.get("result")
+    if v is None:
+        return {"images_found": 0, "note": vis.get("note", "")}
+    d = v.to_dict()
+    d["recovered_into_score"] = bool(vis.get("recovered"))
+    return d
+
+
+def _language_block(a: Analysis) -> dict:
+    """What language it arrived in, and whether it was translated to score it."""
+    lang = getattr(a, "language", None) or {}
+    v = lang.get("verdict")
+    t = lang.get("translation")
+    return {
+        "lang": getattr(v, "lang", "en"),
+        "script": getattr(v, "script", "Latin"),
+        "is_english": getattr(v, "is_english", True),
+        "confidence": getattr(v, "confidence", 0.0),
+        "translated": bool(lang.get("translated")),
+        "translated_from": getattr(t, "language", "") if t else "",
+        "provider": getattr(t, "provider", "") if t else "",
+        "english": (getattr(t, "english", "") or "")[:1200] if t else "",
+        "note": lang.get("note", ""),
+    }
+
+
+def _thread_block(a: Analysis) -> dict:
+    """Whether the conversation this message quotes actually happened.
+
+    Always reported, including the boring answers. "This message does not
+    claim a thread" is a finding; a panel that vanishes is not.
+    """
+    t = getattr(a.evidence, "thread", None)
+    if t is None:
+        return {"state": "unavailable", "note": ""}
+    if not t.claims_thread:
+        state = "no_claim"
+    elif t.fabricated:
+        state = "fabricated"
+    elif t.indeterminate:
+        state = "unknown"
+    else:
+        state = "verified"
+    return {
+        "state": state,
+        "claims_thread": t.claims_thread,
+        "msgid_resolved": t.msgid_resolved,
+        "quote_match": round(t.quote_match_ratio, 3),
+        "subject_known": t.subject_known,
+        "quoted_words": len(t.quoted_text.split()) if t.quoted_text else 0,
+        "note": t.note,
+    }
+
+
+def _breach_block(a: Analysis) -> dict:
+    b = getattr(a, "breach", None)
+    if b is None:
+        return {"checked": False,
+                "note": "breach lookup is off — set ENABLE_BREACH_CHECK in .env"}
+    if b.error:
+        return {"checked": False, "note": f"lookup failed: {b.error}"}
+    return {
+        "checked": True,
+        "breached": b.breached,
+        "breaches": b.breaches[:8],
+        "count": len(b.breaches),
+        "quoted_password_breached": b.quoted_password_breached,
+        "quoted_password_count": b.quoted_password_count,
+        "note": b.describe(),
+    }
+
+
+def _files_block(a: Analysis) -> dict:
+    """Attachments, what they really are, and what VirusTotal knows."""
+    atts = getattr(a, "attachments", []) or []
+    verdicts = {v.sha256: v for v in (getattr(a, "file_verdicts", []) or [])}
+    out = []
+    for f in atts:
+        v = verdicts.get(f.sha256)
+        out.append({
+            "filename": f.filename,
+            "size": f.size,
+            "declared_ext": f.declared_ext,
+            "real_type": f.real_type,
+            "executable": f.executable,
+            "type_mismatch": f.type_mismatch,
+            "archive_contents": f.archive_contents[:6],
+            "archive_hides_executable": f.archive_hides_executable,
+            "sha256": f.sha256,
+            "notes": f.notes,
+            "scan": ({"known": v.known, "malicious": v.malicious,
+                      "suspicious": v.suspicious, "harmless": v.harmless,
+                      "undetected": v.undetected, "type_tag": v.type_tag,
+                      "first_seen": v.first_seen, "error": v.error}
+                     if v else None),
+        })
+    return {"count": len(out), "files": out,
+            "tracked": list(getattr(a, "tracked_files", []) or [])}
+
+
+def _recipient_block(a: Analysis) -> dict:
+    """Why this message is worth more or less TO THIS READER.
+
+    The same phish aimed at a finance mailbox and a personal one are not the
+    same event, and the multiplier is the only part of the score that knows it.
+    """
+    sev = a.severity
+    return {
+        "multiplier": round(sev.recipient_multiplier, 3),
+        "reason": sev.recipient_reason,
+        "base_impact": round(sev.base_impact, 3),
+        "adjusted_impact": round(sev.impact, 3),
+        "applied": sev.recipient_multiplier != 1.0,
+    }
+
+
+def _style_block(a: Analysis) -> dict:
+    """How this message compares with the way the sender usually writes.
+
+    Reported even when it did not score, because "no baseline yet" is a real
+    answer and the alternative is a panel that silently disappears.
+    """
+    from sentinel.stylometry import DRIFT_SUSPICIOUS, describe_trait
+    st = getattr(a.evidence, "style", None)
+    if st is None:
+        return {"scored": False, "note": "style comparison unavailable"}
+    return {
+        "scored": st.scored,
+        "drift": round(st.drift, 3),
+        "threshold": DRIFT_SUSPICIOUS,
+        "unusual": bool(st.scored and st.drift > DRIFT_SUSPICIOUS),
+        "messages_seen": st.messages_seen,
+        "note": st.note,
+        "traits": [{"trait": describe_trait(k), "z": round(z, 2),
+                    "this_message": round(v, 2), "usually": round(mu, 2)}
+                   for k, z, v, mu in st.top],
+    }
 
 
 # ----------------------------------------------------------------- endpoints
@@ -403,6 +568,62 @@ async def threat_profile(mid: str, force: bool = False) -> dict:
                          f"profiling threshold of {settings.llm_profile_min_score:g}"}
     p = await asyncio.to_thread(build_profile, a, settings, _profiles, force)
     return p.to_dict()
+
+
+# Both of these are expensive to produce and identical on every request for a
+# given message, so they are memoised per session like the narrative profile.
+_trajectories: dict[str, dict] = {}
+_drills: dict[str, dict] = {}
+
+
+@app.get("/api/trajectory/{mid}")
+async def trajectory(mid: str, force: bool = False) -> dict:
+    """What the attacker would have done next, had the reader replied.
+
+    Deliberately gated on severity: playing out an escalation ladder for a
+    newsletter would be theatre, and theatre is what makes people stop
+    believing the parts that matter.
+    """
+    from sentinel.profiling.trajectory import build as build_trajectory
+    a = _cache.get(mid)
+    if a is None:
+        raise HTTPException(404, "not in this session's cache — rescan to load it")
+    if not force and a.severity.score < settings.llm_profile_min_score:
+        return {"ok": False, "skipped": True,
+                "error": f"severity {a.severity.score:.1f} is below the "
+                         f"threshold of {settings.llm_profile_min_score:g}"}
+    if mid in _trajectories and not force:
+        return _trajectories[mid]
+    t = await asyncio.to_thread(build_trajectory, a, settings)
+    d = t.to_dict()
+    if t.ok:
+        _trajectories[mid] = d
+    return d
+
+
+@app.get("/api/drill/{mid}")
+async def drill(mid: str, force: bool = False) -> dict:
+    """A practice exercise built from a scam this mailbox actually received.
+
+    Only ever seeded from a message already scored in this session, and it
+    produces questions and pattern descriptions -- never a ready-to-send
+    phishing email. See sentinel/profiling/drill.py for why.
+    """
+    from sentinel.profiling.drill import build as build_drill
+    a = _cache.get(mid)
+    if a is None:
+        raise HTTPException(404, "not in this session's cache — rescan to load it")
+    if not force and a.severity.score < settings.llm_profile_min_score:
+        return {"ok": False, "skipped": True,
+                "error": f"severity {a.severity.score:.1f} is below the "
+                         f"threshold of {settings.llm_profile_min_score:g}"}
+    if mid in _drills and not force:
+        return _drills[mid]
+    d = await asyncio.to_thread(build_drill, a, settings)
+    out = d.to_dict()
+    if d.ok:
+        _drills[mid] = out
+    return out
 
 
 class NoCacheStatic(StaticFiles):

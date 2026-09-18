@@ -317,38 +317,434 @@ def test_twentyfour_hours_a_day_is_not_a_part_time_pitch():
 
 
 # ----------------------------------------------------- fabricated threads
-def _fab_floor_names(hist_signals):
-    """Run the floor layer with thr_fabricated set and the given history."""
-    from unittest.mock import MagicMock
-    import sentinel.scoring.floors as F
+def _fabricated_floors(history):
+    """Score a reply quoting an exchange no mailbox of ours contains."""
+    from sentinel.features.extractor import Email, extract, set_thread_index
+    from sentinel.scoring.floors import applicable
+    from sentinel.threads import ThreadIndex
 
-    feats = {"thr_fabricated": 1.0}
-    ev = MagicMock()
-    ev.thread.note = "quotes a conversation that never happened"
-    ev.sender.address = "peer@example.com"
-    email = MagicMock(date="", body="", subject="")
-    history = MagicMock()
-    history.signals.return_value = hist_signals
-    floors = F.applicable(email, feats, ev, history=history)
-    return {f.name for f in floors}
+    idx = ThreadIndex()
+    for i in range(250):                      # past verify()'s min_index guard
+        idx.add(f"m{i}@corp.example", f"Weekly report {i}",
+                f"Numbers for week {i} are attached, nothing unusual to flag.")
+    set_thread_index(idx)
+    try:
+        e = Email(
+            subject="Re: Updated wire instructions",
+            sender="finance@vendor.example", receiver="me@example.com",
+            body="As discussed below, please use the new account.\n\n"
+                 "> On Tuesday, Accounts Payable wrote:\n"
+                 "> Thanks for confirming the revised remittance details for the\n"
+                 "> Q3 settlement. Our treasury team has approved the change and\n"
+                 "> the updated beneficiary account should be used for all future\n"
+                 "> invoices issued against the framework agreement we signed.\n")
+        f, ev = extract(e)
+        assert f.get("thr_fabricated") == 1.0, "fixture must produce a fabricated verdict"
+        return {x.name for x in applicable(e, f, ev, history=history)}
+    finally:
+        set_thread_index(ThreadIndex())       # global; leave it as we found it
 
 
 def test_fabricated_thread_fires_for_an_unknown_sender():
-    """The attack it was written for: a hijack from a lookalike domain."""
-    assert "fabricated_thread" in _fab_floor_names(
-        {"first_contact": True, "ever_corresponded_with_domain": False,
-         "messages_from_domain": 0})
+    """The attack it was written for: a hijack from a lookalike domain.
+
+    The mailbox has been scanned and knows other correspondents, so "no mail
+    from vendor.example" is a real finding rather than an empty store.
+    """
+    from sentinel.history import History, Party
+    scanned = History(
+        domains={"colleague.example": Party(
+            domain="colleague.example", received=80, sent_to=40,
+            first_seen="2020-01-01T00:00:00+00:00")},
+        messages_scanned=5000)
+    assert "fabricated_thread" in _fabricated_floors(scanned)
 
 
 def test_fabricated_thread_spares_an_established_correspondent():
     """Absence of the original is not evidence of forgery.
 
-    Against 43 real Enron mailboxes this floor called 23.3% of 26,694 genuine
-    quoted replies fabricated -- every one wrong, because a mailbox holds the
-    user's mail, not the whole thread. Requiring that the sender be someone the
-    mailbox has not actually corresponded with drops that to 2.0%. See
-    scripts/eval_thread_verify.py.
+    Replayed against 43 real Enron mailboxes, this floor called 23.3% of 26,694
+    genuine quoted replies fabricated -- every one wrong, because a mailbox
+    holds the user's mail, not the whole thread. Requiring that the sender be
+    someone the mailbox has not actually corresponded with drops that to 2.0%.
+    scripts/eval_thread_verify.py reproduces both numbers.
     """
-    assert "fabricated_thread" not in _fab_floor_names(
-        {"first_contact": False, "ever_corresponded_with_domain": True,
-         "messages_from_domain": 40, "reply_rate": 0.4, "days_known": 900})
+    from sentinel.history import History, Party
+    known = History(domains={"vendor.example": Party(
+        domain="vendor.example", received=40, sent_to=12,
+        first_seen="2020-01-01T00:00:00+00:00")}, messages_scanned=5000)
+    assert "fabricated_thread" not in _fabricated_floors(known)
+
+
+def test_fabricated_thread_stands_down_without_a_history_store():
+    """No history is not evidence of a stranger.
+
+    `hist` is empty until the mailbox has been scanned. Treating that as an
+    unknown sender would fire this floor on every quoted reply a new user
+    receives -- the 23.3% false rate the gate exists to prevent.
+    """
+    from sentinel.history import History
+    assert "fabricated_thread" not in _fabricated_floors(History())
+
+
+# ------------------------------------------------------------- stylometry
+def test_short_messages_have_no_style():
+    """A four-word reply is written the same way by everyone."""
+    from sentinel.stylometry import traits
+    assert traits("Sounds good, thanks!") is None
+    assert traits("word " * 200) is not None
+
+
+def test_quoted_text_and_signatures_are_not_the_sender_s_style():
+    """A long quoted chain would otherwise profile the person being quoted."""
+    from sentinel.stylometry import readable_body
+    body = ("Here is my own short note about the schedule.\n\n"
+            "On Tuesday, Someone Else wrote:\n"
+            "> I tend to write in a completely different manner, at length,\n"
+            "> with many subordinate clauses; and semicolons.\n")
+    out = readable_body(body)
+    assert "my own short note" in out
+    assert "subordinate clauses" not in out
+
+
+def test_profile_recognises_its_own_author():
+    """The whole claim, in miniature.
+
+    Measured properly across 362 Enron senders this reaches 0.915 mean
+    per-sender AUC; see scripts/eval_stylometry.py. Here it only has to prefer
+    the right author over a visibly different one.
+    """
+    from sentinel.stylometry import StyleStore
+    terse = ("got it. will do. sending the file now. no changes needed. "
+             "let me know. thanks. ") * 12
+    formal = ("Dear colleague, I should like to confirm that the documentation "
+              "has been reviewed in full; furthermore, the revised schedule "
+              "remains acceptable to us. Kind regards. ") * 12
+    # The population spread is taken across senders, so several are needed
+    # before any trait can be called unusual -- with two writers there is no
+    # such thing as an unusual writer.
+    chatty = ("so anyway i think we should just go ahead and do it, whatever "
+              "you reckon is fine by me really, up to you! ") * 12
+    legal = ("Pursuant to clause 4.2, the party of the first part shall "
+             "indemnify the party of the second part in respect thereof. ") * 12
+    store = StyleStore()
+    for i in range(14):
+        store.observe("terse@example.com", terse + f"note {i} " * 20)
+        store.observe("formal@example.com", formal + f"item {i} " * 20)
+        store.observe("chatty@example.com", chatty + f"bit {i} " * 20)
+        store.observe("legal@example.com", legal + f"para {i} " * 20)
+    store.fit_population()
+    assert store.ready
+    own = store.compare("terse@example.com", terse + "one more short line here. " * 20)
+    imposter = store.compare("terse@example.com", formal + "a further observation. " * 20)
+    assert own.scored and imposter.scored
+    assert own.drift < imposter.drift
+
+
+def test_style_store_is_not_world_readable(tmp_path):
+    """It describes how people write, which is information about them."""
+    from sentinel.stylometry import StyleStore
+    s = StyleStore()
+    s.observe("a@b.com", "word " * 200)
+    p = tmp_path / "style.json"
+    s.save(p)
+    assert oct(p.stat().st_mode)[-3:] == "600"
+    assert StyleStore.load(p).profiles["a@b.com"].n == 1
+
+
+def test_corpus_guard_clears_style_profiles():
+    """Corpus mail has no baseline in this mailbox, so it must not be compared.
+
+    The thread index taught this lesson the expensive way: a guard that each
+    script must remember to call gets forgotten. Both are cleared together.
+    """
+    from sentinel.features.extractor import set_style_store, style_store
+    from sentinel.stylometry import StyleStore
+    from sentinel.threads import disable_for_corpus
+    seeded = StyleStore()
+    seeded.observe("someone@corp.example", "word " * 200)
+    set_style_store(seeded)
+    assert style_store().profiles
+    disable_for_corpus()
+    assert not style_store().profiles
+
+
+def test_watch_learns_style_only_from_mail_it_cleared():
+    """A suspected impersonation must not teach the profile.
+
+    Otherwise each attack nudges the baseline towards the attacker, and the
+    detector slowly trains itself to accept them.
+    """
+    from unittest.mock import MagicMock
+    from sentinel.features.extractor import set_style_store, style_store
+    from sentinel.stylometry import StyleStore
+    from sentinel.watch import _learn_style
+
+    set_style_store(StyleStore())
+    email = MagicMock(body="word " * 200, html=None)
+
+    hostile = MagicMock(probability=0.97, floors_binding=[])
+    hostile.evidence.sender.address = "ceo@vendor.example"
+    _learn_style(email, hostile)
+    assert not style_store().profiles, "hostile mail must not shape a profile"
+
+    clean = MagicMock(probability=0.02, floors_binding=[])
+    clean.evidence.sender.address = "ceo@vendor.example"
+    _learn_style(email, clean)
+    assert style_store().profiles["ceo@vendor.example"].n == 1
+    set_style_store(StyleStore())
+
+
+# ----------------------------------------------------------- multilingual
+def test_non_latin_scripts_are_decided_by_script():
+    from sentinel.multilingual import detect
+    hindi = ("प्रिय ग्राहक, हम आपको सूचित करना चाहते हैं कि सुरक्षा कारणों से आपका "
+             "बैंक खाता अस्थायी रूप से निलंबित कर दिया गया है।")
+    v = detect(hindi)
+    assert not v.is_english and v.lang == "hi" and v.script == "Devanagari"
+
+
+def test_chinese_is_not_dismissed_as_too_short():
+    """Chinese puts no spaces between words.
+
+    Gating on a word count first made a full paragraph of Han look like nine
+    words and it was skipped entirely. Script is tested on characters instead.
+    """
+    from sentinel.multilingual import detect
+    zh = ("尊敬的客户您好，我们通知您由于安全原因您的银行账户已被临时冻结。"
+          "为了恢复对您账户的访问，您需要在四十八小时内通过下面的链接确认您的个人信息。")
+    v = detect(zh)
+    assert not v.is_english and v.lang == "zh"
+
+
+def test_english_spam_is_not_called_foreign():
+    """The expensive direction: a wrong guess spends a provider call.
+
+    Mangled spam carries no English function words at all, so a pure ratio test
+    divided by ~zero and any stray match won -- that alone mislabelled 4.23% of
+    the corpus. An absolute floor and a distinct-word count bring it to 0.40%.
+    """
+    from sentinel.multilingual import detect
+    assert detect("As simple as black and white Wonderful thing "
+                  "http://bunjax.cn/a/ click here now to see more").is_english
+    assert detect("Where there is love, there is God also. Visit the link "
+                  "below for more information about this offer today").is_english
+
+
+def test_spanish_phishing_is_detected():
+    from sentinel.multilingual import detect
+    v = detect("Estimado cliente, le informamos que su cuenta bancaria ha sido "
+               "suspendida por motivos de seguridad. Para restablecer el acceso "
+               "es necesario que confirme sus datos personales en el enlace.")
+    assert not v.is_english and v.lang == "es"
+
+
+def test_translation_failure_is_not_fatal(monkeypatch):
+    """No provider means a degraded score with a reason, never an exception."""
+    import sentinel.multilingual as M
+    from sentinel.analyzer import ThreatAnalyzer
+    from sentinel.features.extractor import Email
+    from sentinel.settings import settings
+    monkeypatch.setattr(M, "translate",
+                        lambda *a, **k: M.Translation(ok=False, error="no provider"))
+    az = ThreatAnalyzer(settings=settings)
+    a = az.analyze(Email(
+        subject="Verificacion urgente",
+        sender="x@y.tk", receiver="me@example.com",
+        body="Estimado cliente, le informamos que su cuenta bancaria ha sido "
+             "suspendida por motivos de seguridad. Para restablecer el acceso "
+             "es necesario que confirme sus datos personales en el enlace."))
+    assert a.language["translated"] is False
+    assert "unreliable" in a.language["note"]
+    assert a.severity.score >= 0          # still produced a verdict
+
+
+def test_corpus_work_never_translates():
+    """An analyzer built without settings must not call a provider.
+
+    build_dataset and eval_full construct one per run; 319 corpus messages look
+    foreign, and translating them would put an API call inside the training
+    loop.
+    """
+    from sentinel.analyzer import ThreatAnalyzer
+    from sentinel.features.extractor import Email
+    az = ThreatAnalyzer()
+    assert az.settings is None
+    a = az.analyze(Email(
+        subject="Verificacion", sender="x@y.tk", receiver="me@example.com",
+        body="Estimado cliente, le informamos que su cuenta ha sido suspendida "
+             "por motivos de seguridad y debe confirmar sus datos personales."))
+    assert a.language["translated"] is False
+
+
+def test_translation_is_cached_by_content(monkeypatch):
+    """The playground scores on every keystroke pause.
+
+    Without a cache that is one provider call per keystroke for anyone drafting
+    in another language, and a rescan repays for the whole mailbox.
+    """
+    import sentinel.multilingual as M
+    from sentinel.profiling import llm as _llm
+    M._CACHE.clear()
+    calls = {"n": 0}
+
+    def fake(cfg, system, user):
+        calls["n"] += 1
+        return _llm.LLMResult(True, "groq", "m",
+                              data={"language": "Spanish", "english": "hello"})
+
+    # translate() imports llm inside the function, so patch it at its source.
+    monkeypatch.setattr(_llm, "complete", fake)
+    for _ in range(5):
+        assert M.translate("hola que tal", None, subject="s").english == "hello"
+    assert calls["n"] == 1, f"translated {calls['n']} times, expected 1"
+    M._CACHE.clear()
+
+
+# ---------------------------------------------------------------- vision
+def _png(text_lines, qr_url=None, size=(900, 460)):
+    """A picture of an email, the way this evasion actually arrives."""
+    import io
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", size, "white")
+    d = ImageDraw.Draw(img)
+    for i, ln in enumerate(text_lines):
+        d.text((40, 34 + i * 34), ln, fill="black")
+    if qr_url:
+        import qrcode
+        img.paste(qrcode.make(qr_url).resize((150, 150)), (size[0] - 250, size[1] - 210))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _msg_with_image(data, filename="notice.png", inline=False):
+    from email import message_from_bytes
+    from email.message import EmailMessage
+    m = EmailMessage()
+    m["Subject"] = "Action Required"
+    m["From"] = "it@example.tk"
+    m["To"] = "me@example.com"
+    m.set_content("")
+    if inline:
+        m.add_related(data, maintype="image", subtype="png", cid="<img1>")
+    else:
+        m.add_attachment(data, maintype="image", subtype="png", filename=filename)
+    return message_from_bytes(m.as_bytes())
+
+
+def test_inline_images_are_found():
+    """Text-in-image phishing arrives inline, with no filename.
+
+    files.py walks only parts that have a filename because it catalogues
+    attachments, which is why vision cannot reuse that walk.
+    """
+    from sentinel.vision import images_from_message
+    found = images_from_message(_msg_with_image(_png(["Verify your password now"]),
+                                                inline=True))
+    assert len(found) == 1 and found[0].inline
+
+
+def test_tracking_pixels_are_skipped():
+    """A spacer costs a provider call and returns nothing."""
+    from sentinel.vision import images_from_message
+    assert images_from_message(_msg_with_image(_png([""], size=(1, 1)))) == []
+
+
+def test_qr_codes_decode_exactly_and_locally():
+    """Never delegated to a model: an almost-right URL is worse than none."""
+    from sentinel.vision import decode_qr, images_from_message
+    url = "https://microsoft-verify-login.tk/auth?u=8842"
+    imgs = images_from_message(_msg_with_image(_png(["Scan to verify"], qr_url=url)))
+    codes = decode_qr(imgs)
+    assert len(codes) == 1
+    assert codes[0].text == url, "a QR must decode exactly, not approximately"
+    assert codes[0].is_url
+
+
+def test_qr_survives_a_dead_vision_provider(monkeypatch):
+    """Codes are decoded locally, so they do not depend on any provider."""
+    from sentinel.profiling import llm as _llm
+    from sentinel.settings import settings
+    from sentinel import vision
+    monkeypatch.setattr(_llm, "complete_vision",
+                        lambda *a, **k: _llm.LLMResult(False, "none", error="quota"))
+    url = "https://pay-now.tk/x"
+    r = vision.inspect(_msg_with_image(_png(["Scan me"], qr_url=url)), settings)
+    assert r.ok and [q.text for q in r.qr_codes] == [url]
+    assert "quota" in r.note
+
+
+def test_recovered_text_is_appended_not_substituted(monkeypatch):
+    """A message that is half prose and half picture must be scored on both."""
+    from sentinel.analyzer import ThreatAnalyzer
+    from sentinel.features.extractor import Email
+    from sentinel.profiling import llm as _llm
+    from sentinel.settings import settings
+    monkeypatch.setattr(_llm, "complete_vision",
+                        lambda *a, **k: _llm.LLMResult(
+                            True, "groq", "m",
+                            data={"text": "CONFIRM YOUR PASSWORD IMMEDIATELY",
+                                  "says": "a sign-in page", "asks_for": "credentials"}))
+    e = Email(subject="Action Required", sender="it@example.tk",
+              receiver="me@example.com", body="Please see attached.")
+    e.raw_message = _msg_with_image(_png(["Confirm your password immediately"]))
+    az = ThreatAnalyzer(settings=settings)
+    scored, vis = az._recover_images(e)
+    assert "Please see attached." in scored.body
+    assert "CONFIRM YOUR PASSWORD IMMEDIATELY" in scored.body
+    assert vis["recovered"] is True
+
+
+# ------------------------------------------------------------ similarity
+def test_embeddings_beat_word_overlap_on_paraphrase():
+    """The whole reason this exists alongside SimHash.
+
+    SimHash clusters messages that share words, which is right for one blast
+    sent to many people and wrong for the same scam rewritten. Measured over
+    five paraphrase pairs, embeddings ranked the true match first 5/5 against
+    TF-IDF's 2/5.
+    """
+    import numpy as np
+    from sentinel.similarity import encode
+    original = ("Your account has been suspended. Verify your password "
+                "within 24 hours or lose access.")
+    paraphrase = ("We have temporarily locked your profile. Confirm your login "
+                  "details inside one day to avoid closure.")
+    unrelated = ("The quarterly gas nomination schedule is attached for your "
+                 "review before Friday.")
+    v = encode([original, paraphrase, unrelated])
+    assert float(v[0] @ v[1]) > float(v[0] @ v[2]) + 0.25
+
+
+def test_weak_matches_are_not_reported():
+    """A 0.2 match is noise dressed as evidence."""
+    import numpy as np
+    from sentinel.similarity import MIN_USEFUL, SimilarityIndex
+    ix = SimilarityIndex(
+        vectors=np.zeros((2, 256), dtype=np.float16),
+        labels=np.array([1, 0], dtype=np.int8),
+        vector_names=["x", "y"], subjects=["a", "b"],
+        senders=["s", "t"], sources=["c", "c"])
+    assert ix.search("anything at all") == []
+    assert MIN_USEFUL > 0.2
+
+
+def test_a_missing_index_does_not_break_scoring():
+    """Retrieval is evidence; the verdict must not depend on it."""
+    from pathlib import Path
+    from sentinel.similarity import SimilarityIndex
+    ix = SimilarityIndex.load(Path("/nonexistent/similarity_index.npz"))
+    assert ix.size == 0 and ix.search("hello there") == []
+
+
+def test_neighbours_are_never_a_model_feature():
+    """The nearest neighbour's label is close to the answer.
+
+    Feeding it to the model would be leakage rather than learning, so it must
+    not appear in the feature vector.
+    """
+    from sentinel.features.extractor import FEATURE_NAMES
+    leaked = [n for n in FEATURE_NAMES
+              if "neighbour" in n or "similar" in n or n.startswith("nn_")]
+    assert leaked == [], f"retrieval leaked into the feature vector: {leaked}"

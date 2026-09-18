@@ -189,7 +189,17 @@ async function openDetail(id, rowNodeRef) {
   // Transform only — see architecture.js for why opacity entrances are unsafe.
   anime({ targets: panel.querySelectorAll(".sec"), translateY: [10, 0],
           delay: anime.stagger(28), duration: 330, easing: "easeOutCubic" });
-  if ((d.card?.score ?? 0) >= window.__profileMin) loadGraph(id);
+  // The fill carries its final width in data-w and is laid out at 0 first, so
+  // a dropped frame leaves a bar that is wrong in length but never missing.
+  panel.querySelectorAll(".sty-fill").forEach((el) => {
+    anime({ targets: el, width: `${el.dataset.w}%`, duration: 620,
+            delay: 180, easing: "easeOutCubic" });
+  });
+  if ((d.card?.score ?? 0) >= window.__profileMin) {
+    loadGraph(id);
+    loadTrajectory(id);
+    loadDrill(id);
+  }
   // Fired here, not awaited above: the deterministic analysis is already on
   // screen, and the narrative fills in beside it when the provider answers.
   if (window.__llm?.any && window.__autoProfile &&
@@ -431,7 +441,24 @@ function renderDetail(panel, d) {
     h += `</div>`;
   }
 
-  if (d.counterfactuals?.length) {
+  // Every check ArnosAI ran, including the ones that found nothing. A check
+  // that passed is a result, and showing a bare 0 instead tells the reader
+  // neither what was examined nor what the number would have meant.
+  h += renderChecks(d);
+
+  // Filled in by loadTrajectory / loadDrill once the provider answers. The
+  // slots exist up front so the panel does not reflow under the reader when
+  // two network calls land at different moments.
+  if ((d.card?.score ?? 0) >= window.__profileMin) {
+    h += `<div class="sec" id="traj-slot" data-owner="${esc(c.id)}">
+            <h3>If you had replied</h3>
+            <p class="note">Working out what happens next…</p></div>`;
+    h += `<div class="sec" id="drill-slot" data-owner="${esc(c.id)}">
+            <h3>Practice on this one</h3>
+            <p class="note">Building a drill from this message…</p></div>`;
+  }
+
+    if (d.counterfactuals?.length) {
     h += `<div class="sec"><h3>What would change the verdict</h3>
           <p class="note">${d.counterfactuals.map(esc).join("<br>")}</p></div>`;
   }
@@ -602,3 +629,350 @@ function pulseBand(band) {
 
 boot();
 loadStatus();
+
+// ---------------------------------------------------------------- checks
+const CHECK_STATE = {
+  clear:  { cls: "ok",   label: "clear" },
+  flag:   { cls: "bad",  label: "flagged" },
+  watch:  { cls: "warn", label: "worth a look" },
+  na:     { cls: "na",   label: "not applicable" },
+  off:    { cls: "off",  label: "not enabled" },
+};
+
+function checkRows(d) {
+  const rows = [];
+  const th = d.thread || {};
+  rows.push({
+    name: "Quoted conversation",
+    ...( th.state === "fabricated"
+        ? { state: "flag", line: `Quotes ${th.quoted_words} words of a conversation that is nowhere in this mailbox.` }
+      : th.state === "verified"
+        ? { state: "clear", line: `The quoted exchange is in this mailbox (${Math.round((th.quote_match || 0) * 100)}% of it matched).` }
+      : th.state === "unknown"
+        ? { state: "watch", line: th.note || "Claims a thread, but there is not enough indexed mail to judge." }
+      : { state: "na", line: "This message does not claim to continue an earlier exchange." }),
+  });
+
+  const st = d.style || {};
+  rows.push({
+    name: "Writing style",
+    ...( st.scored && st.unusual
+        ? { state: "flag", line: `Drift ${st.drift} against ${st.messages_seen} earlier messages — above the ${st.threshold} mark.` }
+      : st.scored
+        ? { state: "clear", line: `Drift ${st.drift}, consistent with the ${st.messages_seen} earlier messages from this sender.` }
+      : { state: "na", line: st.note || "No style baseline for this sender yet." }),
+  });
+
+  const f = d.files || {};
+  const bad = (f.files || []).filter((x) => x.executable || x.type_mismatch || x.archive_hides_executable ||
+                                            (x.scan && x.scan.malicious > 0));
+  rows.push({
+    name: "Attachments",
+    ...( !f.count
+        ? { state: "na", line: "No files attached, so nothing to identify or scan." }
+      : bad.length
+        ? { state: "flag", line: `${bad.length} of ${f.count} file(s) are not what they appear to be.` }
+        : { state: "clear", line: `${f.count} file(s); contents match their extensions and nothing is executable.` }),
+  });
+
+  const b = d.breach || {};
+  rows.push({
+    name: "Credential exposure",
+    ...( !b.checked
+        ? { state: "off", line: b.note || "Breach lookup is not enabled." }
+      : b.quoted_password_breached
+        ? { state: "flag", line: `A password quoted in this message appears in ${b.quoted_password_count.toLocaleString()} known breaches.` }
+      : b.breached
+        ? { state: "watch", line: `This address appears in ${b.count} known breach(es) — sextortion and credential lures become more plausible.` }
+        : { state: "clear", line: "This address does not appear in the breach corpus." }),
+  });
+
+  const r = d.recipient || {};
+  rows.push({
+    name: "Relevance to you",
+    ...( r.applied
+        ? { state: "watch", line: `Impact ${r.applied ? `x${r.multiplier}` : ""} — ${r.reason}` }
+        : { state: "na", line: "Nothing about this mailbox makes the message more or less dangerous than average." }),
+  });
+
+  const N = d.neighbours || {};
+  const n0 = (N.items || [])[0];
+  rows.push({
+    name: "Seen before",
+    ...( !n0
+        ? { state: "na", line: "Nothing in the 65,000-message corpus resembles this closely enough to show." }
+      : n0.malicious
+        ? { state: "flag", line: N.summary }
+        : { state: "clear", line: N.summary }),
+  });
+
+  const V = d.vision || {};
+  const qr = V.qr_codes || [];
+  rows.push({
+    name: "Images and QR codes",
+    ...( !V.images_found
+        ? { state: "na", line: "No images in this message, so nothing to read or decode." }
+      : qr.length && V.recovered_into_score
+        ? { state: "flag", line: `Read ${V.images_read} image(s) and decoded ${qr.length} code(s); the hidden text and links were scored.` }
+      : qr.length
+        ? { state: "flag", line: `${qr.length} QR/barcode(s) decoded — a link that never appears as text.` }
+      : V.recovered_into_score
+        ? { state: "watch", line: `${V.images_found} image(s); text found inside was recovered and scored.` }
+        : { state: "clear", line: V.note || `${V.images_found} image(s), nothing readable inside.` }),
+  });
+
+  const L = d.language || {};
+  rows.push({
+    name: "Language",
+    ...( L.translated
+        ? { state: "watch", line: `Written in ${L.translated_from || L.lang} — translated to English by ${L.provider} before scoring.` }
+      : !L.is_english
+        ? { state: "watch", line: L.note || `Detected as ${L.lang}; not translated, so the wording signal is unreliable.` }
+        : { state: "clear", line: "English — the wording lexicons apply directly." }),
+  });
+
+  const nRules = (d.rules_fired || []).length;
+  rows.push({
+    name: "Rule votes",
+    ...( nRules
+        ? { state: "watch", line: `${nRules} labelling rule(s) voted on the attack type.` }
+        : { state: "na", line: "No labelling rule matched; the attack type came from the model." }),
+  });
+  return rows;
+}
+
+function renderChecks(d) {
+  // `esc` is a local in renderDetail, not a module binding, so this needs its
+  // own copy rather than reaching for one that is not in scope here.
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const rows = checkRows(d);
+  let h = `<div class="sec"><h3>Checks performed</h3>
+    <p class="note">Each of these ran on this message. A check that found nothing
+       is a result too — it says what was examined and what it would have taken
+       to fail.</p><div class="chk-grid">`;
+  rows.forEach((r) => {
+    const st = CHECK_STATE[r.state] || CHECK_STATE.na;
+    h += `<div class="chk ${st.cls}">
+            <div class="chk-top"><span class="chk-name">${esc(r.name)}</span>
+              <span class="chk-pill">${st.label}</span></div>
+            <div class="chk-line">${esc(r.line)}</div></div>`;
+  });
+  h += `</div>`;
+
+  // Detail for the checks that actually have something to show.
+  const st = d.style || {};
+  if (st.scored && st.traits?.length) {
+    const pct = Math.max(0, Math.min(100, (st.drift / 1.6) * 100));
+    h += `<div class="chk-detail"><h4>How this sender normally writes</h4>
+      <div class="sty-bar"><div class="sty-fill${st.unusual ? " bad" : ""}"
+           style="width:0%" data-w="${pct.toFixed(1)}"></div>
+           <div class="sty-mark" style="left:${((st.threshold / 1.6) * 100).toFixed(1)}%"></div></div>
+      <div class="sty-traits">` +
+      st.traits.map((t) => `<div class="sty-t"><span class="sty-n">${esc(t.trait)}</span>
+         <span class="sty-v">${t.this_message} <em>vs</em> ${t.usually}</span></div>`).join("") +
+      `</div><p class="note" style="margin-top:8px">Left figure is this message,
+        right is this sender's usual rate. Style is corroboration, not proof: at
+        this threshold it catches about one impersonation in eight, so it never
+        moves the score by itself.</p></div>`;
+  }
+
+  const f = d.files || {};
+  if (f.count) {
+    h += `<div class="chk-detail"><h4>Files</h4>`;
+    f.files.forEach((x) => {
+      const scan = x.scan;
+      h += `<div class="fl">
+        <div class="fl-top"><span class="fl-name">${esc(x.filename)}</span>
+          <span class="fl-size">${(x.size / 1024).toFixed(0)} KB</span></div>
+        <div class="fl-line">Declared <code>${esc(x.declared_ext || "none")}</code>,
+             actually <code>${esc(x.real_type)}</code>
+             ${x.type_mismatch ? `<span class="fl-bad">— these disagree</span>` : ""}</div>
+        ${x.archive_hides_executable
+          ? `<div class="fl-line fl-bad">Archive contains an executable: ${x.archive_contents.map(esc).join(", ")}</div>` : ""}
+        ${scan && scan.known
+          ? `<div class="fl-line">VirusTotal: <strong>${scan.malicious}</strong> engines call it malicious,
+             ${scan.suspicious} suspicious, ${scan.harmless + scan.undetected} clean.</div>`
+          : scan && scan.error
+            ? `<div class="fl-line">VirusTotal: ${esc(scan.error)}</div>`
+            : `<div class="fl-line">VirusTotal has never seen this file — new files are not automatically safe ones.</div>`}
+        <div class="fl-hash">${esc(x.sha256.slice(0, 32))}…</div></div>`;
+    });
+    if (f.tracked?.length) {
+      h += `<p class="note">Tracked after download: ${f.tracked.map(esc).join(", ")}.
+            Behaviour is compared against the score this message received.</p>`;
+    }
+    h += `</div>`;
+  }
+
+  const N2 = d.neighbours || {};
+  if ((N2.items || []).length) {
+    h += `<div class="chk-detail"><h4>Closest known messages</h4>
+      <p class="note">Nearest neighbours among 64,988 labelled corpus messages,
+         matched on meaning rather than shared words. Shown as evidence only —
+         a neighbour's label is close to the answer, so it is never fed to the
+         model.</p>`;
+    N2.items.forEach((n) => {
+      h += `<div class="nb${n.malicious ? " mal" : ""}">
+        <div class="nb-sim">${Math.round(n.similarity * 100)}%</div>
+        <div class="nb-body">
+          <div class="nb-subj">${esc(n.subject || "(no subject)")}</div>
+          <div class="nb-meta">${n.malicious
+            ? `<span class="nb-tag">${esc((n.vector || "malicious").replace(/_/g, " "))}</span>`
+            : `<span class="nb-tag ben">legitimate</span>`}
+            <span class="nb-src">${esc(n.source)}</span></div>
+        </div></div>`;
+    });
+    h += `</div>`;
+  }
+
+  const V2 = d.vision || {};
+  if ((V2.qr_codes || []).length || V2.text_found) {
+    h += `<div class="chk-detail"><h4>Recovered from images</h4>`;
+    if (V2.says) {
+      h += `<p class="note">The picture presents itself as ${esc(V2.says)}${
+        V2.asks_for ? `, and pushes you to ${esc(V2.asks_for)}` : ""}.</p>`;
+    }
+    (V2.qr_codes || []).forEach((q) => {
+      h += `<div class="qr"><span class="qr-tag">${esc(q.format)}</span>
+              <span class="qr-txt">${esc(q.text)}</span></div>`;
+    });
+    if (V2.text_found) {
+      h += `<div class="xlate">${esc(V2.text_found)}</div>`;
+    }
+    h += `<p class="note" style="margin-top:8px">Codes are decoded locally and
+          exactly; the text was transcribed by ${esc(V2.provider || "a model")}.
+          Both were put through the same lexicons and URL checks as ordinary
+          body text.</p></div>`;
+  }
+
+  const L2 = d.language || {};
+  if (L2.translated && L2.english) {
+    h += `<div class="chk-detail"><h4>Scored on this translation</h4>
+      <p class="note">The original is shown above; every wording check ran on
+         the English below, because all 26 lexicons are English.</p>
+      <div class="xlate">${esc(L2.english)}</div></div>`;
+  }
+
+  const rules = d.rules_fired || [];
+  if (rules.length) {
+    h += `<div class="chk-detail"><h4>Rule votes on the attack type</h4>`;
+    rules.forEach((v) => {
+      h += `<div class="rv"><span class="rv-w">${v.weight.toFixed(1)}</span>
+              <span class="rv-v">${esc(v.votes_for)}</span>
+              <span class="rv-r">${esc(v.reason)}</span></div>`;
+    });
+    h += `</div>`;
+  }
+  return h + `</div>`;
+}
+
+// ------------------------------------------------------- attack trajectory
+async function loadTrajectory(id) {
+  const slot = document.getElementById("traj-slot");
+  if (!slot || slot.dataset.owner !== id) return;
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let t;
+  try {
+    t = await (await fetch(`/api/trajectory/${encodeURIComponent(id)}`)).json();
+  } catch (e) {
+    t = { ok: false, error: String(e) };
+  }
+  // The reader may have clicked another message while this was in flight.
+  if (slot.dataset.owner !== id) return;
+  if (!t.ok) {
+    slot.innerHTML = `<h3>If you had replied</h3>
+      <p class="note">${esc(t.error || "unavailable")}</p>`;
+    return;
+  }
+  let h = `<h3>If you had replied</h3>
+    <div class="traj-head"><span class="traj-pb">${esc(t.playbook)}</span>
+      <span class="traj-prov">${esc(t.provider)}</span></div>
+    <p class="traj-sum">${esc(t.summary)}</p><div class="traj">`;
+  t.stages.forEach((s) => {
+    h += `<div class="tstage">
+      <div class="tnum">${s.stage}</div>
+      <div class="tbody">
+        <div class="ttitle">${esc(s.title)}</div>
+        <div class="thappens">${esc(s.happens)}</div>
+        <div class="tmeta"><span class="task">They want: ${esc(s.ask)}</span>
+          <span class="ttell">Giveaway: ${esc(s.tell)}</span></div>
+      </div></div>`;
+  });
+  h += `</div>`;
+  if (t.cost_if_it_worked) {
+    h += `<div class="tcost"><strong>If it worked:</strong> ${esc(t.cost_if_it_worked)}</div>`;
+  }
+  if (t.stop_it_here) {
+    h += `<div class="tstop"><strong>Easiest place to stop it:</strong> ${esc(t.stop_it_here)}</div>`;
+  }
+  slot.innerHTML = h;
+  anime({ targets: slot.querySelectorAll(".tstage"), translateX: [-12, 0],
+          delay: anime.stagger(70), duration: 380, easing: "easeOutCubic" });
+}
+
+// ------------------------------------------------------------------ drill
+async function loadDrill(id) {
+  const slot = document.getElementById("drill-slot");
+  if (!slot || slot.dataset.owner !== id) return;
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let d;
+  try {
+    d = await (await fetch(`/api/drill/${encodeURIComponent(id)}`)).json();
+  } catch (e) {
+    d = { ok: false, error: String(e) };
+  }
+  if (slot.dataset.owner !== id) return;
+  if (!d.ok) {
+    slot.innerHTML = `<h3>Practice on this one</h3>
+      <p class="note">${esc(d.error || "unavailable")}</p>`;
+    return;
+  }
+  let h = `<h3>Practice on this one</h3>
+    <p class="note">${esc(d.title)} — answer first, then check.</p><div class="drill">`;
+  d.questions.forEach((q, qi) => {
+    h += `<div class="dq" data-a="${q.answer}">
+      <div class="dq-q">${qi + 1}. ${esc(q.q)}</div><div class="dq-opts">`;
+    q.options.forEach((o, oi) => {
+      h += `<button class="dq-o" data-i="${oi}">${esc(o)}</button>`;
+    });
+    h += `</div><div class="dq-why">${esc(q.why)}</div></div>`;
+  });
+  h += `</div>`;
+  if (d.variations?.length) {
+    h += `<div class="chk-detail"><h4>The same trick in other clothes</h4>`;
+    d.variations.forEach((v) => {
+      h += `<div class="dvar"><span class="dvar-d">${esc(v.disguise)}</span>
+              <span class="dvar-h">${esc(v.how_it_runs)}</span></div>`;
+    });
+    h += `</div>`;
+  }
+  if (d.rule_of_thumb) {
+    h += `<div class="drule">${esc(d.rule_of_thumb)}</div>`;
+  }
+  slot.innerHTML = h;
+
+  slot.querySelectorAll(".dq").forEach((card) => {
+    const right = Number(card.dataset.a);
+    card.querySelectorAll(".dq-o").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (card.classList.contains("done")) return;
+        card.classList.add("done");
+        const picked = Number(btn.dataset.i);
+        card.querySelectorAll(".dq-o").forEach((b, i) => {
+          if (i === right) b.classList.add("right");
+          else if (i === picked) b.classList.add("wrong");
+          b.disabled = true;
+        });
+        const why = card.querySelector(".dq-why");
+        why.classList.add("show");
+        anime({ targets: why, translateY: [-6, 0], duration: 260,
+                easing: "easeOutCubic" });
+      });
+    });
+  });
+  anime({ targets: slot.querySelectorAll(".dq"), translateY: [10, 0],
+          delay: anime.stagger(60), duration: 340, easing: "easeOutCubic" });
+}
