@@ -17,6 +17,9 @@ from .embedded import (EMBEDDED_FEATURE_NAMES, EmbeddedIdentity, analyse as anal
                        embedded_features)
 from .headers import HEADER_FEATURE_NAMES, SenderProfile, header_features, parse_sender
 from .phones import PHONE_FEATURE_NAMES, PhoneFact, extract_phones, phone_features
+from ..enrich.urlmodel import UrlOpinion
+from ..threads import THREAD_FEATURE_NAMES, ThreadIndex, ThreadVerdict
+from ..threads import thread_features, verify as verify_thread
 from .text import TEXT_FEATURE_NAMES, strip_html, text_features
 from .urls import URL_FEATURE_NAMES, UrlFact, extract_urls, url_features
 
@@ -53,6 +56,11 @@ class Email:
     reply_to: str = ""
     return_path: str = ""
     auth_results: str = ""
+    in_reply_to: str = ""
+    references: str = ""
+    # The parsed MIME message, when the source had one. Attachment bytes are
+    # only reachable from here, and only live mail has them.
+    raw_message: object | None = None
 
     @property
     def uid(self) -> str:
@@ -74,6 +82,8 @@ class Evidence:
     urls: list[UrlFact]
     phones: list[PhoneFact]
     embedded: EmbeddedIdentity
+    thread: ThreadVerdict
+    url_opinion: UrlOpinion
     hits: list[lx.Hit]
     attachments: list[str]
     dangerous_attachments: list[str]
@@ -145,12 +155,39 @@ FEATURE_NAMES: tuple[str, ...] = (
     + URL_FEATURE_NAMES
     + PHONE_FEATURE_NAMES
     + EMBEDDED_FEATURE_NAMES
+    + THREAD_FEATURE_NAMES
     + TEXT_FEATURE_NAMES
     + ATTACHMENT_FEATURE_NAMES
     + LEXICON_FEATURE_NAMES
 )
 N_FEATURES = len(FEATURE_NAMES)
 FEATURE_INDEX = {n: i for i, n in enumerate(FEATURE_NAMES)}
+
+
+# Loaded once. Absent index = every thread verdict is "indeterminate", which is
+# exactly what should happen when there is nothing to check against.
+_THREAD_INDEX: ThreadIndex | None = None
+
+
+def thread_index() -> ThreadIndex:
+    global _THREAD_INDEX
+    if _THREAD_INDEX is None:
+        _THREAD_INDEX = ThreadIndex.load()
+    return _THREAD_INDEX
+
+
+def set_thread_index(ix: ThreadIndex) -> None:
+    """Override the index. Training MUST call this with an empty index.
+
+    Corpus messages came from other people's mailboxes. Checking their quoted
+    threads against this user's index would mark every legitimate reply in the
+    corpus as fabricated, and the model would learn that quoting a real
+    conversation is evidence of fraud -- precisely backwards. An empty index
+    makes every verdict "indeterminate", which is the truth: there is nothing
+    to check those messages against.
+    """
+    global _THREAD_INDEX
+    _THREAD_INDEX = ix
 
 
 def extract(email: Email) -> tuple[dict[str, float], Evidence]:
@@ -164,6 +201,8 @@ def extract(email: Email) -> tuple[dict[str, float], Evidence]:
     urls = extract_urls(body_text, html)
     phones = extract_phones(f"{subject}\n{body_text}")
     embedded = analyse_embedded(body_text, sender.address)
+    thread = verify_thread(email, thread_index())
+
     hits = lx.scan(body_text, "body") + lx.scan(subject, "subject")
 
     feats: dict[str, float] = {}
@@ -171,6 +210,8 @@ def extract(email: Email) -> tuple[dict[str, float], Evidence]:
     feats.update(url_features(urls))
     feats.update(phone_features(f"{subject}\n{body_text}", phones))
     feats.update(embedded_features(embedded, len(urls)))
+    feats.update(thread_features(thread))
+
     feats.update(text_features(subject, body_raw))
 
     att_feats, dangerous, doubles = _attachment_features(email, body_text)
@@ -194,6 +235,8 @@ def extract(email: Email) -> tuple[dict[str, float], Evidence]:
         urls=urls,
         phones=phones,
         embedded=embedded,
+        thread=thread,
+        url_opinion=UrlOpinion(),
         hits=hits,
         attachments=list(email.attachments),
         dangerous_attachments=dangerous,

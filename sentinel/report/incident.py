@@ -197,10 +197,15 @@ def to_markdown(analysis: Analysis) -> str:
                   if analysis.floors_binding
                   else "calibrated P(malicious) from the intent model")
     A(f"| intent | {sev.intent:.3f} | {intent_src} |")
-    A(f"| impact | {sev.impact:.2f} | taxonomy weight for *{analysis.vector.name}* |")
+    A(f"| impact | {sev.impact:.2f} | taxonomy weight for *{analysis.vector.name}*"
+      + (f", adjusted x{sev.recipient_multiplier:.2f} for this recipient"
+         if sev.recipient_multiplier != 1.0 else "") + " |")
     A(f"| exploitability | {sev.exploitability:.2f} | {len(sev.exploit_parts)} signal(s), listed below |")
     A(f"| targeting | {sev.targeting:.2f} | {len(sev.target_parts)} signal(s), listed below |")
     A("")
+    if sev.recipient_reason:
+        A(f"**Recipient exposure** — {sev.recipient_reason}")
+        A("")
     if sev.exploit_parts:
         A("**Exploitability — how directly this can be acted on:**")
         A("")

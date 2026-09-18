@@ -81,6 +81,9 @@ def from_message(msg: Message, source: str = "eml") -> Email:
         reply_to=reply_to,
         return_path=return_path,
         auth_results=_decode(msg.get("Authentication-Results")),
+        in_reply_to=_decode(msg.get("In-Reply-To")),
+        references=_decode(msg.get("References")),
+        raw_message=msg,
     )
     return email
 

@@ -68,6 +68,10 @@ FEATURE_LABEL: dict[str, str] = {
     "emb_body_sender_mismatch": "a body sender that contradicts the actual sender",
     "emb_bracket_cta": "a call to action with no visible destination",
     "emb_cta_without_url": "a call to action in a message containing no links at all",
+    "thr_claims_thread": "a claim to be continuing an existing conversation",
+    "thr_msgid_resolved": "a reply reference that resolves to a real message",
+    "thr_quote_match": "how much of the quoted text exists in this mailbox",
+    "thr_fabricated": "a quoted conversation that never happened",
     "tel_count": "phone numbers in the message",
     "tel_toll_free": "a toll-free number, rentable anonymously for a campaign",
     "tel_international": "an international phone number",
@@ -145,6 +149,7 @@ DIRECT_INDICATORS: frozenset[str] = frozenset({
     "url_has_hex_encoding", "url_deep_subdomain",
     "txt_html_hidden_style", "txt_zero_width_chars", "txt_homoglyph_chars",
     "txt_thread_hijack_marker", "txt_spaced_letter_runs", "txt_subject_is_reply",
+    "thr_claims_thread", "thr_msgid_resolved", "thr_fabricated",
     "emb_body_sender_mismatch", "emb_bracket_cta", "emb_cta_without_url",
     "tel_count", "tel_toll_free", "tel_international", "tel_call_to_action",
     "tel_billing_pretext", "tel_callback_shape",
@@ -240,6 +245,9 @@ def describe(attr: Attribution, ev: Evidence,
             detail = f"observed value: {v:g}"
             if ev.urls:
                 quotes = [u.raw[:110] for u in ev.urls[:1]]
+    elif f.startswith("thr_"):
+        detail = ev.thread.note or f"observed value: {v:g}"
+        quotes = [ev.thread.quoted_text[:150]] if ev.thread.quoted_text else []
     elif f.startswith("emb_"):
         detail = "; ".join(ev.embedded.notes) or f"observed value: {v:g}"
         quotes = ev.embedded.claimed_addresses[:2] or ev.embedded.bracket_ctas[:2]

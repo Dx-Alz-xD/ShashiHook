@@ -32,11 +32,11 @@ class Hit:
 LEXICONS: dict[str, list[str]] = {
     "urgency": [
         r"\burgent(?:ly)?\b", r"\bimmediate(?:ly)?\b", r"\bact now\b",
-        r"\bright away\b", r"\bas soon as possible\b", r"\basap\b",
+        r"\bright away\b", r"\bas soon as possible\b", r"\b(?:reply|respond|confirm|call|act)\b[^.!?\n]{0,12}\basap\b",
         r"\bwithin (?:24|48|72) hours?\b", r"\bexpir(?:es?|ing|ed) (?:today|soon|in)\b",
         r"\bfinal (?:notice|warning|reminder)\b", r"\blast chance\b",
         r"\btime[- ]sensitive\b", r"\bdo not delay\b", r"\bbefore it'?s too late\b",
-        r"\bdeadline\b", r"\bprompt attention\b",
+        r"\bprompt attention\b",
     ],
     "authority": [
         r"\b(?:ceo|cfo|coo|cto|chairman|managing director|president)\b",
@@ -98,7 +98,6 @@ LEXICONS: dict[str, list[str]] = {
         r"\bhelp me (?:out )?with (?:some )?(?:money|cash|\$|£|€|₹)\b",
         r"\bcan you (?:kindly )?(?:spare|lend)\b",
         r"\bpay(?:ment)? (?:me|us) (?:back|the)\b",
-        r"\bdonat(?:e|ion)\b", r"\bcontribut(?:e|ion)\b",
         r"\bsponsor(?:ship)?\b", r"\bfund ?rais(?:e|ing|er)\b",
     ],
     "identity_claim": [
@@ -163,7 +162,10 @@ LEXICONS: dict[str, list[str]] = {
         r"\bemail (?:account )?(?:will be )?(?:deactivated|suspended)\b",
     ],
     "attachment_lure": [
-        r"\bsee (?:the )?attach(?:ed|ment)\b", r"\bplease (?:find|review|open) (?:the )?attach",
+        # "see the attached" measured 0 malicious / 217 benign over 20,000
+        # labelled messages -- it is how legitimate mail refers to an
+        # attachment. Only the imperative forms carry signal.
+        r"\bplease (?:find|review|open) (?:the )?attach",
         r"\benable (?:editing|content|macros?)\b", r"\bprotected (?:view|document)\b",
         r"\bdocument is (?:encrypted|protected)\b",
         r"\bpassword (?:for|to) (?:the )?(?:file|archive|attachment|document) is\b",
@@ -235,9 +237,28 @@ LEXICONS: dict[str, list[str]] = {
         r"\bno (?:experience|interview|qualification) (?:required|needed|necessary)\b",
         r"\bearn (?:up to )?[$£€₹]?\s?[\d,]+\s?(?:per|a|each|/)\s?(?:day|week|hour|month)\b",
         r"\bdaily (?:payout|payment|earning)s?\b",
-        r"\b(?:registration|security|training|processing) fee\b",
+        # A conference legitimately charges a "registration fee" -- 220 benign
+        # corpus messages say so, against 8 malicious. The fee only matters when
+        # it is a precondition for work, or when it comes with a figure attached.
+        r"\b(?:registration|security|training|processing|activation|onboarding|"
+        r"start[- ]?up|joining|clearance|placement)\s+fees?\b"
+        r"[^.!?\n]{0,80}\b(?:job|position|employment|hir(?:e|ed|ing)|salary|"
+        r"appointment|start work|begin work)\b",
+        r"\b(?:a|one[- ]?time|small|refundable|nominal|initial)\s+(?:\w+\s+){0,2}"
+        r"fee\s+of\s+[$£€₹]\s?[\d,]+",
         r"\bsend (?:us )?your (?:bank|account) details? (?:for|to) (?:salary|payment)\b",
-        r"\btask[- ]based (?:job|work|earning)\b", r"\bcomplete (?:simple )?tasks?\b",
+        r"\btask[- ]based (?:job|work|earning)\b",
+        # "complete simple tasks" alone fired 38 times in EMSCAD, every one on a
+        # genuine posting. It only means anything when payment is attached.
+        r"\bcomplete (?:simple |easy |small )?tasks?\b[^.!?\n]{0,40}"
+        r"\b(?:earn|paid|payment|commission|per task|\$)",
+        # A short daily commitment is the core of the part-time pitch:
+        # "2-3 hours a day of your spare time". Bounded to 1-8 so it cannot
+        # catch "24 hours a day, 7 days a week", which is a support line.
+        r"\b[1-8](?:\s*(?:-|to|–)\s*[1-8])?\s+(?:hours?|hrs?)\s+(?:a|per|each)\s+day\b",
+        r"\b(?:[1-9]0|[1-5]\d)\s+(?:minutes?|mins?)\s+(?:a|per|each)\s+day\b",
+        r"\b(?:cash pay\b|paid (?:daily|weekly) in cash\b|daily (?:cash )?payments?\b)",
+        r"\b(?:in|during)\s+your\s+(?:free|spare)\s+time\b",
         r"\bdata entry (?:job|work|operator)\b",
         r"\bwhat ?s ?app (?:me|us|your)\b", r"\btelegram (?:me|us|group|channel)\b",
     ],
@@ -305,17 +326,30 @@ LEXICONS: dict[str, list[str]] = {
         # fired 35 times and was wrong 34 times -- on Slashdot war coverage, an
         # academic "call for contributions", and a farewell-gift collection.
         # An appeal is recognisable by its structure, not its vocabulary.
+        # "flooding has LEFT many households without..." -- the disaster as
+        # subject rather than the people as subject.
+        r"\b(?:flood(?:ing|s)?|earthquake|hurricane|cyclone|famine|drought|wildfire|"
+        r"tsunami|conflict)\b[^.!?\n]{0,40}\b(?:has|have) (?:left|displaced|destroyed|"
+        r"devastated|affected)\b",
+        r"\b(?:households|families|residents|villages) (?:without|in need|in crisis|displaced)\b",
         r"\b(?:affected|impacted|displaced|devastated) by\b[^.!?\n]{0,40}"
         r"\b(?:flood(?:ing|s)?|earthquake|hurricane|cyclone|famine|drought|"
         r"wildfire|tsunami|disaster|crisis|conflict|war)\b",
         r"\b(?:contribution|donation)s? of\b[^.!?\n]{0,20}[\d$£€₹]",
-        r"\b(?:your |a |each |every )?(?:contribution|donation|gift)s?\b"
-        r"[^.!?\n]{0,24}\b(?:can|will|would|help)\b[^.!?\n]{0,20}"
-        r"\b(?:help|provide|support|fund|feed|shelter|save)\b",
+        # Found by evasion mining: "can provide" was in the verb list, "can
+        # fund" and "would enable us to assemble" were not, and a paraphrase
+        # dropped this bank from 4 hits to 1.
+        r"\b(?:your |a |modest |small |each |every )?(?:contribution|donation|gift|support)s?\b"
+        r"[^.!?\n]{0,30}\b(?:can|will|would|could|help)\b[^.!?\n]{0,26}"
+        r"\b(?:help|provide|fund|support|feed|shelter|save|assemble|deliver|supply|buy)\b",
         r"\b(?:disaster|emergency|humanitarian) (?:relief|response|aid|appeal|assistance)\b",
         r"\brelief (?:fund|effort|package|campaign|operation)s?\b",
         r"\bemergency (?:assistance|shelter|supplies|appeal|programme|program)\b",
-        r"\b(?:clean water|temporary shelter|essential medicines?|food supplies)\b",
+        r"\b(?:clean|safe|drinking) water\b",
+        r"\b(?:temporary |emergency )?shelter\b", r"\bessential medicines?\b",
+        r"\bfood (?:supplies|parcels?|aid)\b",
+        r"\brelief (?:bundle|package|kit|parcel)\b",
+        r"\bwithout (?:clean |safe |drinking )?(?:water|shelter|food|a roof)\b",
         r"\bevery (?:penny|cent|dollar|pound|rupee) (?:goes|helps|counts)\b",
         r"\bplease (?:give|donate|help|support)\b[^.!?\n]{0,24}"
         r"\b(?:generously|now|today)\b",
@@ -332,7 +366,7 @@ LEXICONS: dict[str, list[str]] = {
     "impersonated_brand": [
         r"\bpaypal\b", r"\bmicrosoft\b", r"\boffice ?365\b", r"\bo365\b",
         r"\bdocusign\b", r"\bdropbox\b", r"\bsharepoint\b", r"\bonedrive\b",
-        r"\bamazon\b", r"\bapple\b", r"\bicloud\b", r"\bnetflix\b",
+        r"\bamazon\b", r"\bapple (?:id|account|support|store|pay)\b", r"\bicloud\b", r"\bnetflix\b",
         r"\bgoogle (?:docs|drive|account)\b", r"\blinkedin\b", r"\badobe\b",
         r"\bfedex\b", r"\bdhl\b", r"\bups\b", r"\bups delivery\b",
         r"\bhmrc\b", r"\birs\b", r"\bwells fargo\b", r"\bchase\b", r"\bcitibank\b",

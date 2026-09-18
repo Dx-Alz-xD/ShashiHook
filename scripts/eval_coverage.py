@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from sentinel.threads import disable_for_corpus
 from sentinel.config import ARTIFACTS
 from sentinel.features.extractor import Email, extract, to_vector
 from sentinel.labeling.taxonomy import describe
@@ -34,6 +35,8 @@ BAND_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"]
 
 
 def main() -> None:
+    # Corpus mail is not from this mailbox.
+    disable_for_corpus()
     X = np.load(ARTIFACTS / "X.npy")
     meta = pd.read_parquet(ARTIFACTS / "meta.parquet")
     texts = np.array(pd.read_parquet(ARTIFACTS / "text.parquet")["text"].tolist(), dtype=object)

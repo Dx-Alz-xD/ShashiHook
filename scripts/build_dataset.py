@@ -17,12 +17,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sentinel.config import ARTIFACTS, RANDOM_SEED, TEST_SIZE
 from sentinel.data.loaders import load_all, row_to_email
-from sentinel.features.extractor import FEATURE_NAMES, extract, to_vector
+from sentinel.features.extractor import (FEATURE_NAMES, extract,
+                                         set_thread_index, to_vector)
+from sentinel.threads import ThreadIndex, disable_for_corpus
 from sentinel.labeling.weak_rules import vote
 
 
 def main() -> None:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    # See set_thread_index: corpus mail must not be checked against this
+    # user's mailbox index.
+    disable_for_corpus()
+    print("Thread index disabled for training (corpus mail is not from this mailbox)")
     print("Loading corpora")
     df = load_all(verbose=True)
 

@@ -164,9 +164,12 @@ function pgRender(d) {
       `<span class="token">${esc(l)}</span>`).join("")}</div>` : ""}`;
 
   if (window.anime && pgLast && Math.abs(delta) >= 0.05) {
+    // Rendered correct already; the count is a flourish over a correct value.
     anime({ targets: { n: prev }, n: d.score, duration: 420, easing: "easeOutCubic",
       update: (a) => { const el = document.querySelector("#pg-num");
-        if (el) el.textContent = a.animations[0].currentValue.toFixed(1); } });
+        if (el) el.textContent = a.animations[0].currentValue.toFixed(1); },
+      complete: () => { const el = document.querySelector("#pg-num");
+        if (el) el.textContent = d.score.toFixed(1); } });
     anime({ targets: "#pg-num", scale: [1.16, 1], duration: 340, easing: "easeOutBack" });
   }
   if (window.anime) {

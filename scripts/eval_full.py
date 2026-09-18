@@ -11,6 +11,7 @@ from sklearn.metrics import (average_precision_score, classification_report,
                              confusion_matrix, roc_auc_score)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from sentinel.threads import disable_for_corpus
 from sentinel.config import ARTIFACTS
 from sentinel.features.extractor import Email
 from sentinel.models.intent import IntentModel
@@ -20,6 +21,8 @@ from sentinel.features.extractor import extract
 
 
 def main() -> None:
+    # Corpus mail is not from this mailbox.
+    disable_for_corpus()
     X = np.load(ARTIFACTS / "X.npy")
     meta = pd.read_parquet(ARTIFACTS / "meta.parquet")
     texts = np.array(pd.read_parquet(ARTIFACTS / "text.parquet")["text"].tolist(), dtype=object)

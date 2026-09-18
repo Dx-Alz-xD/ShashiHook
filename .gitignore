@@ -19,3 +19,7 @@ data/nazario/
 # Large dataset files
 phishing emails/archive (6)/CEAS_08.csv
 phishing emails/archive (6)/phishing_email.csv
+artifacts/thread_index.json
+artifacts/sender_profiles.json
+data/kaggle/
+*.csv.gz

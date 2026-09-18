@@ -26,7 +26,10 @@ from pathlib import Path
 
 from .analyzer import Analysis, ThreatAnalyzer
 from .config import ARTIFACTS
+from .enrich.breach import BreachCache
 from .enrich.rdap import DomainAgeCache
+from .enrich.virustotal import VirusTotal
+from .files import FileTracker
 from .settings import Settings
 
 BAND_RANK = {"INFORMATIONAL": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
@@ -129,18 +132,59 @@ def poll_once(az: ThreatAnalyzer, cfg: Settings, state: WatchState,
     return fresh
 
 
+def _sweep_files(tracker: FileTracker, on_event) -> None:
+    """Check whether any tracked attachment has appeared on disk or changed.
+
+    Runs on the same tick as the mailbox poll. The watcher is already awake and
+    already the thing the user leaves running, so a separate daemon for this
+    would be a second process to forget about.
+
+    Only files from mail that scored above the tracking threshold are looked
+    for. Watching every download would be surveillance with a security label
+    on it.
+    """
+    for ev in tracker.sweep():
+        kind = ev.get("event")
+        name = ev.get("filename", "?")
+        if kind == "appeared_on_disk":
+            title = "Tracked attachment downloaded"
+            body = f"{name}\n{ev.get('path','')}"
+            if ev.get("quarantine"):
+                body += f"\n{ev['quarantine']}"
+        elif kind == "process_running_from_path":
+            title = "Tracked file is RUNNING"
+            body = f"{name}\n{ev.get('path','')}"
+        else:
+            title = "Tracked file changed"
+            body = f"{name}\n{ev.get('path','')}"
+        if not notify(title, "ShashiHook file tracking", body):
+            on_event(f"  !! {title}: {name}")
+        on_event(f"  FILE {kind}: {name} — {ev.get('path','')}")
+
+
 def run(cfg: Settings, interval: int = 300, min_band: str = "MEDIUM",
         limit: int = 30, query: str = "newer_than:1d", mailbox: str = "INBOX",
         once: bool = False, on_event=print) -> None:
+    watch_dirs = ([Path(d.strip()).expanduser() for d in cfg.file_watch_dirs.split(",")
+                   if d.strip()] or None)
+    tracker = FileTracker(min_severity=cfg.file_track_min_severity,
+                          **({"watch_dirs": watch_dirs} if watch_dirs else {}))
     az = ThreatAnalyzer(
         known_bad_iocs=cfg.load_iocs(),
         software_allowlist=cfg.load_software_allowlist(),
         inbox_base_rate=cfg.inbox_base_rate or None,
         domain_age=DomainAgeCache(ARTIFACTS / "domain_age_cache.json",
                                   enabled=cfg.enable_rdap),
+        breach=BreachCache(ARTIFACTS / "breach_cache.json",
+                           enabled=cfg.breach_check_account),
+        virustotal=VirusTotal(cfg.virustotal_api_key, cfg.virustotal_allow_upload,
+                              ARTIFACTS / "vt_cache.json"),
+        file_tracker=tracker,
     )
     state = WatchState.load()
     on_event(f"Watching {mailbox} every {interval}s · alerting at {min_band.upper()}+")
+    on_event(f"Also sweeping {', '.join(str(d) for d in tracker.watch_dirs)} for "
+             f"attachments from mail scoring >= {cfg.file_track_min_severity:g}")
     on_event(f"{len(state.seen):,} message ids already seen — these will not re-alert.")
     if not shutil.which("osascript"):
         on_event("osascript unavailable: alerts will print here instead.")
@@ -168,8 +212,10 @@ def run(cfg: Settings, interval: int = 300, min_band: str = "MEDIUM",
                 first = False
             else:
                 fresh = poll_once(az, cfg, state, min_band, limit, query, mailbox, on_event)
+                _sweep_files(tracker, on_event)
                 on_event(f"  poll {state.polls}: {len(fresh)} new · "
                          f"{state.notified} alerts total · "
+                         f"{len(tracker.files)} file(s) tracked · "
                          f"{time.time()-t0:.1f}s")
             if once:
                 return

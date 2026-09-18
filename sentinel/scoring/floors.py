@@ -143,11 +143,23 @@ def applicable(email: Email, feats: dict[str, float], ev: Evidence,
     # Mailbox history, when a store has been built. A sender the user has
     # corresponded with for months is a different proposition from one that
     # has never appeared before, and no training corpus can express that.
-    hist = history.signals(ev.sender.address) if (history and ev.sender.address) else {}
+    _hour = None
+    if getattr(email, "date", ""):
+        try:
+            from email.utils import parsedate_to_datetime
+            _hour = parsedate_to_datetime(email.date).hour
+        except Exception:
+            _hour = None
+    hist = (history.signals(ev.sender.address, hour=_hour)
+            if (history and ev.sender.address) else {})
     first_contact = bool(hist.get("first_contact"))
+    # Reply rate is the real trust signal. Receiving mail is passive and says
+    # nothing; replying repeatedly is a deliberate act an attacker cannot
+    # manufacture retroactively.
+    reply_rate = float(hist.get("reply_rate") or 0.0)
     established = bool(hist and not first_contact
                        and (hist.get("messages_from_domain", 0) >= 5
-                            or hist.get("ever_corresponded_with_domain"))
+                            or reply_rate >= 0.05)
                        and (hist.get("days_known") or 0) >= 30)
 
     allow = software_allowlist if software_allowlist is not None else \
@@ -336,6 +348,57 @@ def applicable(email: Email, feats: dict[str, float], ev: Evidence,
                          "names a remote-access tool in an unauthenticated message, "
                          "which is how a support scam takes the machine"))
 
+    # ---- a relationship that lapsed and came back ---------------------------
+    # A domain that corresponded for years, went silent, and has just
+    # reappeared is the shape of a re-registered domain or a freshly
+    # compromised account. Every other history signal reads "known and safe",
+    # which is exactly why this one is worth having.
+    dormant = hist.get("dormant_days")
+    if dormant and dormant >= 365 and (
+            payment >= 1 or _f(feats, "lex_credential_request_count") >= 1
+            or _f(feats, "lex_money_request_count") >= 1 or _f(feats, "att_count") > 0):
+        out.append(Floor("dormant_sender_returns", 0.80,
+                         f"no mail from this domain for {dormant} days, and the "
+                         f"message that breaks the silence asks for money, "
+                         f"credentials or carries an attachment"))
+
+    if (hist.get("unusual_hour") and not authenticated
+            and (payment >= 1 or _f(feats, "lex_credential_request_count") >= 1)):
+        out.append(Floor("off_rhythm_send_time", 0.75,
+                         "arrived at an hour this sender has never used before, "
+                         "unauthenticated, asking for money or credentials"))
+
+    # ---- fabricated conversation -------------------------------------------
+    # A genuine reply quotes a genuine message, so a quoted exchange that is
+    # nowhere in the mailbox looks like proof the attacker wrote it.
+    #
+    # It is not, on its own. Replayed against 43 real Enron mailboxes -- index
+    # grown message by message in date order, exactly as deployment does it --
+    # this called 23.3% of 26,694 genuine quoted replies fabricated. None of
+    # them were. A mailbox holds the user's mail, not the whole thread: the
+    # original sits in a folder that was never exported, or in the other
+    # party's account, and absence of the original is not evidence of forgery.
+    #
+    # What survives is the conjunction. A thread hijack arrives from a
+    # lookalike or freshly registered domain, because an attacker who already
+    # held the real account would not need to fake the quote. Against someone
+    # the mailbox has genuinely corresponded with, a missing original is far
+    # more likely to mean an incomplete mailbox than a forgery, so the floor
+    # stands down and the feature is left to argue its case in the model.
+    #
+    # That conjunction takes the same 26,694 replies from 23.3% to 2.0%,
+    # suppressing 91.6% of the false positives while leaving the attack it was
+    # written for untouched. scripts/eval_thread_verify.py reproduces both.
+    if _f(feats, "thr_fabricated"):
+        # Deliberately not the `established` above: that one is tuned for
+        # deception floors and requires 30 days of acquaintance. Reusing the
+        # name here would also rebind it for the anchor-mismatch floor below.
+        thread_peer_known = (hist.get("ever_corresponded_with_domain")
+                             and hist.get("messages_from_domain", 0) >= 3)
+        if not thread_peer_known:
+            out.append(Floor("fabricated_thread", 0.90,
+                             ev.thread.note or "quotes a conversation that never happened"))
+
     # ---- identity asserted in the body -------------------------------------
     # The header layer cannot see this: the From line is truthful about whoever
     # actually sent the message, while the person the reader thinks they are
@@ -420,6 +483,9 @@ FLOOR_VECTOR: dict[str, str] = {
     "qr_credential_lure": "credential_phishing",
     "unsolicited_money_request": "advance_fee_fraud",
     "body_sender_mismatch": "credential_phishing",
+    "fabricated_thread": "credential_phishing",
+    "dormant_sender_returns": "bec_payment_fraud",
+    "off_rhythm_send_time": "bec_payment_fraud",
     "callback_phishing_shape": "callback_phishing",
     "delivery_pretext_no_link": "delivery_scam",
     "delivery_fee_request": "delivery_scam",

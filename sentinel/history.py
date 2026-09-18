@@ -51,6 +51,11 @@ class Party:
     sent_to: int = 0           # messages the user sent to them
     first_seen: str = ""
     last_seen: str = ""
+    # Hour-of-day histogram of when this party sends, in the user's local time.
+    # A domain that has only ever arrived on weekday mornings and suddenly
+    # lands at 03:00 has changed in a way no content signal would show.
+    hours: dict = field(default_factory=dict)
+    weekdays: dict = field(default_factory=dict)
 
     @property
     def is_known(self) -> bool:
@@ -60,6 +65,48 @@ class Party:
     def is_corresponded(self) -> bool:
         """The user has actually written to this party -- strong trust."""
         return self.sent_to > 0
+
+    @property
+    def reply_rate(self) -> float:
+        """Replies sent per message received.
+
+        Far stronger than "have I ever written to this domain". Receiving mail
+        is passive and says nothing -- anyone can send to you. Replying is a
+        deliberate act repeated over time, and an attacker cannot manufacture
+        it retroactively.
+        """
+        return min(1.0, self.sent_to / self.received) if self.received else 0.0
+
+    def dormancy_days(self, now=None) -> int | None:
+        """Days between the previous message and the most recent one.
+
+        A domain that sent 200 messages through 2021, went silent for three
+        years and suddenly reappeared is the classic shape of a lapsed domain
+        that has been re-registered, or an account that has just been taken
+        over. Nothing in the message body shows it.
+        """
+        if not self.last_seen or not self.first_seen or self.received < 3:
+            return None
+        try:
+            first = datetime.fromisoformat(self.first_seen)
+            last = datetime.fromisoformat(self.last_seen)
+        except ValueError:
+            return None
+        span = (last - first).days
+        if span <= 0:
+            return None
+        typical = span / max(self.received - 1, 1)
+        now = now or datetime.now(timezone.utc)
+        gap = (now - last).days
+        # Reported only when the latest gap dwarfs this sender's own rhythm.
+        return gap if gap > max(120, typical * 8) else None
+
+    def unusual_hour(self, hour: int) -> bool:
+        """True when this hour is outside everything this party has ever used."""
+        if sum(self.hours.values()) < 8:
+            return False
+        seen = {int(h) for h, n in self.hours.items() if n > 0}
+        return hour not in seen and not any(abs(hour - s) <= 1 for s in seen)
 
 
 @dataclass
@@ -87,7 +134,8 @@ class History:
             return None
         return max(0, (datetime.now(timezone.utc) - first).days)
 
-    def signals(self, address: str) -> dict[str, float | bool | int | None]:
+    def signals(self, address: str, hour: int | None = None
+                ) -> dict[str, float | bool | int | None]:
         a, d = self.lookup(address)
         return {
             "sender_known": a.is_known,
@@ -97,6 +145,9 @@ class History:
             "messages_from_domain": d.received,
             "messages_sent_to_domain": d.sent_to,
             "days_known": self.days_known(address),
+            "reply_rate": round(d.reply_rate, 3),
+            "dormant_days": d.dormancy_days(),
+            "unusual_hour": d.unusual_hour(hour) if hour is not None else False,
         }
 
     def describe(self, address: str) -> str:
@@ -105,9 +156,12 @@ class History:
             return "first contact — no prior mail from or to this domain"
         bits = [f"{s['messages_from_domain']} message(s) received from this domain"]
         if s["messages_sent_to_domain"]:
-            bits.append(f"{s['messages_sent_to_domain']} sent to it")
+            bits.append(f"{s['messages_sent_to_domain']} sent to it "
+                        f"(reply rate {s['reply_rate']:.0%})")
         if s["days_known"] is not None:
             bits.append(f"known for {s['days_known']} days")
+        if s["dormant_days"]:
+            bits.append(f"but silent for {s['dormant_days']} days before this")
         return "; ".join(bits)
 
     # --------------------------------------------------------------- i/o
@@ -156,6 +210,14 @@ def _touch(store: dict[str, Party], key: str, *, is_domain: bool,
             p.first_seen = when
         if not p.last_seen or when > p.last_seen:
             p.last_seen = when
+        if received:
+            try:
+                dt = datetime.fromisoformat(when)
+                h, wd = str(dt.hour), str(dt.weekday())
+                p.hours[h] = p.hours.get(h, 0) + 1
+                p.weekdays[wd] = p.weekdays.get(wd, 0) + 1
+            except ValueError:
+                pass
 
 
 def build(cfg: Settings, folders: tuple[str, ...] = ("INBOX", "[Gmail]/Sent Mail"),

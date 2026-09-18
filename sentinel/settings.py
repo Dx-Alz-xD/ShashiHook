@@ -103,6 +103,22 @@ class Settings:
     quarantine_folder: str = field(
         default_factory=lambda: _get("SENTINEL_QUARANTINE_FOLDER", "ShashiHook/Quarantine"))
 
+    # --- file and breach enrichment -----------------------------------------
+    # Hash lookup sends a SHA-256 and nothing else. Upload sends the file, which
+    # VirusTotal shares with its partners permanently -- a separate decision.
+    virustotal_api_key: str = field(default_factory=lambda: _get("VIRUSTOTAL_API_KEY"))
+    virustotal_allow_upload: bool = field(
+        default_factory=lambda: _flag("VIRUSTOTAL_ALLOW_UPLOAD", False))
+    # Account lookup discloses the address to a third party; off by default.
+    # The quoted-password check is k-anonymous and always available.
+    breach_check_account: bool = field(
+        default_factory=lambda: _flag("SENTINEL_BREACH_CHECK_ACCOUNT", False))
+    # Only files from mail scored at or above this are tracked on disk.
+    file_track_min_severity: float = field(
+        default_factory=lambda: float(_get("SENTINEL_FILE_TRACK_MIN_SEVERITY", "40")))
+    file_watch_dirs: str = field(
+        default_factory=lambda: _get("SENTINEL_FILE_WATCH_DIRS", ""))
+
     # --- enrichment ---------------------------------------------------------
     ioc_file: str = field(default_factory=lambda: _get("SENTINEL_IOC_FILE"))
     software_allowlist_file: str = field(
@@ -149,6 +165,11 @@ class Settings:
             f"  report dir               {self.report_dir}",
             f"  save message bodies      {self.save_bodies}",
             f"  RDAP domain age          {'enabled' if self.enable_rdap else 'disabled'}",
+            f"  VIRUSTOTAL_API_KEY       {mask(self.virustotal_api_key)}  "
+            f"(upload {'ALLOWED' if self.virustotal_allow_upload else 'off'})",
+            f"  breach: account lookup   {'on' if self.breach_check_account else 'off'}"
+            f"   quoted-password check   always on (k-anonymous)",
+            f"  file tracking above      severity {self.file_track_min_severity:g}",
             f"  GEMINI_API_KEY           {mask(self.gemini_api_key)}  "
             f"({self.gemini_model})",
             f"  GROQ_API_KEY             {mask(self.groq_api_key)}  ({self.groq_model})",

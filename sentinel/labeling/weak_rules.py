@@ -236,9 +236,16 @@ def apply_lfs(email: Email, f: dict[str, float], ev: Evidence) -> list[Vote]:
 
     # ------------------------------------------------------------- job scam
     job = _lex(f, "job_scam")
+    # A bulk-marker guard was tried here to spare career newsletters. It only
+    # worked at bulk == 0, which cost 8 of 18 malicious hits to spare 2 of
+    # 41,155 benign -- a bad trade for a class this short of examples.
     if job >= 2:
-        w_ = 2.6 if re.search(r"(?i)\b(?:registration|security|training|processing) fee\b", both) \
-            else 2.0
+        # An upfront fee demanded as a precondition for work is the single
+        # strongest tell; a job that costs money to start is not a job.
+        w_ = 2.6 if re.search(
+            r"(?i)\b(?:registration|security|training|processing|activation|"
+            r"onboarding|start[- ]?up|joining|clearance|placement)\s+fees?\b",
+            both) else 2.0
         votes.append(Vote("lf_job_offer", "job_scam", w_,
                           "unsolicited job or paid-task offer"))
     if job >= 1 and re.search(r"(?i)\b(?:what ?s ?app|telegram)\b", both):

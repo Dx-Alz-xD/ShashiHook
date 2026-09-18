@@ -11,8 +11,12 @@ from .explain.narrative import (Finding, build_findings, counterfactual_sentence
                                 wording_sentence)
 from .explain.shap_explainer import ExplanationBundle, IntentExplainer
 from .features.extractor import Email, Evidence, extract, to_vector
+from .enrich.breach import BreachCache, BreachStatus
 from .enrich.rdap import DomainAgeCache
+from .enrich.virustotal import FileVerdict, VirusTotal
+from .files import AttachmentFile, FileTracker
 from .history import History
+from .recipient import RecipientProfile
 from .labeling.taxonomy import Vector, describe
 from .labeling.weak_rules import Vote, vote
 from .models.intent import IntentModel
@@ -22,6 +26,7 @@ from .scoring.floors import apply as apply_floors
 from .scoring.floors import applicable as applicable_floors
 from .scoring.floors import implied_vector
 from .scoring.prior import adjust as adjust_prior
+from .config import SEVERITY_BANDS
 from .scoring.severity import SeverityResult
 from .scoring.severity import score as severity_score
 
@@ -70,6 +75,10 @@ class Analysis:
 
     history_note: str = ""
     domain_age_note: str = ""
+    breach: BreachStatus | None = None
+    attachments: list[AttachmentFile] = field(default_factory=list)
+    file_verdicts: list[FileVerdict] = field(default_factory=list)
+    tracked_files: list[str] = field(default_factory=list)
 
     def iocs(self) -> dict[str, list[str]]:
         """Indicators an analyst can block or hunt on immediately."""
@@ -90,7 +99,11 @@ class ThreatAnalyzer:
                  software_allowlist: set[str] | None = None,
                  inbox_base_rate: float | None = None,
                  history: History | None = None,
-                 domain_age: DomainAgeCache | None = None):
+                 domain_age: DomainAgeCache | None = None,
+                 recipient: RecipientProfile | None = None,
+                 breach: BreachCache | None = None,
+                 virustotal: VirusTotal | None = None,
+                 file_tracker: FileTracker | None = None):
         """`software_allowlist` exempts domains that legitimately distribute
         executables -- your own release host, an open-source project you follow.
         It is the one detection whose correctness depends on the organisation:
@@ -115,6 +128,12 @@ class ThreatAnalyzer:
         # Optional live enrichment; when absent, the floors that use it simply
         # do not fire.
         self.domain_age = domain_age
+        # Built by scripts/build_recipient_profile.py from mail already local.
+        self.recipient = recipient if recipient is not None else RecipientProfile.load()
+        self.breach = breach
+        self.virustotal = virustotal
+        # Registers attachments for on-disk tracking, above its own threshold.
+        self.file_tracker = file_tracker
 
     def analyze(self, email: Email) -> Analysis:
         feats, ev = extract(email)
@@ -153,7 +172,39 @@ class ThreatAnalyzer:
         else:
             vec_key, vec_conf, vec_src = rule_vec, rule_conf, "rule"
 
-        sev = severity_score(feats, ev, p, vec_key, self.known_bad_iocs)
+        sev = severity_score(feats, ev, p, vec_key, self.known_bad_iocs,
+                             recipient=self.recipient)
+
+        # --- enrichment, all of it optional and all of it failing soft -------
+        breach = None
+        if self.breach is not None:
+            breach = BreachStatus(address=ev.sender.address)
+            pw, real, n = self.breach.quoted_password(ev.body or "")
+            breach.quoted_password, breach.quoted_password_breached = pw, real
+            breach.quoted_password_count = n
+            if email.receiver:
+                acct = self.breach.account(email.receiver.split(",")[0].strip())
+                breach.breached, breach.breaches = acct.breached, acct.breaches
+            # Exposure is context, not evidence: millions of addresses appear in
+            # breaches and almost none of their owners are under attack today.
+            # A few points, never a band change on its own.
+            if breach.breached or breach.quoted_password_breached:
+                sev.score = round(min(100.0, sev.score + 3.0), 1)
+                sev.band = next(b for t, b in SEVERITY_BANDS if sev.score >= t)
+
+        atts, verdicts, tracked = [], [], []
+        if getattr(email, "raw_message", None) is not None:
+            from .files import from_message as files_from_message
+            atts = files_from_message(email.raw_message)
+            if self.virustotal is not None and self.virustotal.enabled:
+                for f in atts:
+                    verdicts.append(self.virustotal.lookup(f.sha256, f.filename, f.size))
+            if self.file_tracker is not None:
+                for f in atts:
+                    if self.file_tracker.register(
+                            f, subject=email.subject or "", sender=ev.sender.address or "",
+                            severity=sev.score, vector=vec_key):
+                        tracked.append(f.filename)
 
         # Only probe counterfactuals for features actually present -- asking
         # "what if there were no dangerous attachment" when there is none
@@ -174,5 +225,7 @@ class ThreatAnalyzer:
                           if self.history and ev.sender.address else ""),
             domain_age_note=(self.domain_age.lookup(ev.sender.registrable).describe()
                              if self.domain_age and ev.sender.registrable else ""),
+            breach=breach, attachments=atts, file_verdicts=verdicts,
+            tracked_files=tracked,
             wording_summary=wording_sentence(bundle),
         )

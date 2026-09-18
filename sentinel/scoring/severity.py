@@ -54,10 +54,17 @@ class SeverityResult:
     escalators: list[Component] = field(default_factory=list)
     exploit_parts: list[Component] = field(default_factory=list)
     target_parts: list[Component] = field(default_factory=list)
+    recipient_multiplier: float = 1.0
+    recipient_reason: str = ""
+    base_impact: float = 0.0     # taxonomy weight before the recipient adjustment
 
     def arithmetic(self) -> str:
         """The formula with this message's numbers substituted in."""
-        s = (f"100 x {self.intent:.3f} x ({W_IMPACT} x {self.impact:.2f} + "
+        # `impact` already includes the multiplier; show the factors that
+        # produced it, not the product multiplied a second time.
+        imp = (f"{self.impact:.2f}" if self.recipient_multiplier == 1.0
+               else f"({self.base_impact:.2f} x {self.recipient_multiplier:.2f})")
+        s = (f"100 x {self.intent:.3f} x ({W_IMPACT} x {imp} + "
              f"{W_EXPLOIT} x {self.exploitability:.2f} + "
              f"{W_TARGET} x {self.targeting:.2f}) = {self.base_score:.1f}")
         for e in self.escalators:
@@ -102,8 +109,17 @@ def _accumulate(feats: dict[str, float], signals) -> tuple[float, list[Component
 
 
 def score(feats: dict[str, float], ev: Evidence, intent: float, vector: str,
-          known_bad_iocs: set[str] | None = None) -> SeverityResult:
+          known_bad_iocs: set[str] | None = None, recipient=None) -> SeverityResult:
     impact = impact_of(vector)
+
+    # Impact is a property of what the reader can be made to do, not of the
+    # message alone. The same gift-card request to someone who releases
+    # payments and to someone who never sees an invoice is the same content and
+    # a different consequence. Bounded to roughly +-35%: a profile inferred
+    # from mail is an inference, not an org chart.
+    base_impact = impact
+    r_mult, r_reason = (recipient.multiplier(vector) if recipient else (1.0, ""))
+    impact = max(0.0, min(1.0, impact * r_mult))
     exploitability, exploit_parts = _accumulate(feats, EXPLOIT_SIGNALS)
     targeting, target_parts = _accumulate(feats, TARGET_SIGNALS)
 
@@ -139,7 +155,10 @@ def score(feats: dict[str, float], ev: Evidence, intent: float, vector: str,
     band = next(b for threshold, b in SEVERITY_BANDS if total >= threshold)
 
     return SeverityResult(score=round(total, 1), band=band, intent=round(intent, 4),
-                          impact=impact, exploitability=round(exploitability, 3),
+                          impact=round(impact, 3), base_impact=round(base_impact, 3),
+                          recipient_multiplier=round(r_mult, 3),
+                          recipient_reason=r_reason,
+                          exploitability=round(exploitability, 3),
                           targeting=round(targeting, 3), base_score=round(base, 1),
                           escalators=escalators, exploit_parts=exploit_parts,
                           target_parts=target_parts)

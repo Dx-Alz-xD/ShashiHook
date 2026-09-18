@@ -58,8 +58,21 @@ function bump(id, value) {
   const node = $(id);
   const from = parseInt(node.textContent, 10) || 0;
   if (from === value) return;
+
+  // Write the real value FIRST, then animate over it.
+  //
+  // This is the third time this exact bug has appeared. anime.js drives
+  // updates from requestAnimationFrame, which the browser throttles whenever
+  // the pane is backgrounded or unfocused. Any value produced only inside an
+  // `update` callback is then never written at all -- here the counters stayed
+  // on 0 while ten rows sat visibly in the feed. The rule that fixes the whole
+  // class: the DOM must already be correct before any animation starts, so an
+  // animation that never runs costs a flourish and never information.
+  node.textContent = value;
+  if (!window.anime) return;
   anime({ targets: { n: from }, n: value, duration: 420, easing: "easeOutCubic",
-    update: (a) => { node.textContent = Math.round(a.animations[0].currentValue); } });
+    update: (a) => { node.textContent = Math.round(a.animations[0].currentValue); },
+    complete: () => { node.textContent = value; } });
   anime({ targets: node, scale: [1.18, 1], duration: 300, easing: "easeOutBack" });
 }
 
@@ -120,6 +133,16 @@ function addRow(m) {
   if (m.band === "CRITICAL" || m.band === "HIGH") {
     anime({ targets: node.querySelector(".edge"), scaleY: [0.3, 1],
             duration: 520, easing: "easeOutElastic(1, .6)" });
+  }
+  pulseBand(m.band);
+  // Count the score up on arrival: the eye follows the change, and a number
+  // that moves reads as a measurement rather than a label.
+  if (window.anime && m.score > 0) {
+    const el = node.querySelector(".score");
+    el.textContent = m.score.toFixed(1);   // correct before the animation starts
+    anime({ targets: { n: 0 }, n: m.score, duration: 520, easing: "easeOutCubic",
+            update: (a) => { el.textContent = a.animations[0].currentValue.toFixed(1); },
+            complete: () => { el.textContent = m.score.toFixed(1); } });
   }
   refreshStats();
 }
@@ -536,4 +559,46 @@ try {
   if (saved) document.documentElement.dataset.theme = saved;
 } catch {}
 
+/* ------------------------------------------------------------ motion
+   Every entrance below animates transform, never opacity. requestAnimationFrame
+   is throttled when the pane is backgrounded, and an interrupted opacity
+   animation strands the element invisible -- the architecture panel rendered
+   completely blank that way. A stranded transform is merely "already in
+   position". */
+function boot() {
+  if (!window.anime) return;
+  const t = anime.timeline({ easing: "easeOutExpo" });
+  t.add({ targets: ".logo", scale: [0.4, 1], rotate: [-35, 0], duration: 620 })
+   .add({ targets: ".brand h1, .brand .by", translateX: [-14, 0],
+          delay: anime.stagger(55), duration: 460 }, "-=420")
+   .add({ targets: ".titlebar .pill", translateY: [-10, 0],
+          delay: anime.stagger(60), duration: 420 }, "-=380")
+   .add({ targets: ".toolbar .field, .toolbar .btn",
+          translateY: [8, 0], delay: anime.stagger(35), duration: 380 }, "-=300")
+   .add({ targets: ".stat", translateY: [14, 0],
+          delay: anime.stagger(45), duration: 460 }, "-=260");
+
+  // A slow specular sweep across the mark. Runs once a minute, not a loop --
+  // permanent motion in a monitoring surface is fatiguing.
+  const shimmer = () => anime({
+    targets: ".logo::after", duration: 0, complete: () => {} });
+  const el = document.querySelector(".logo");
+  if (el) {
+    setInterval(() => {
+      el.animate([{ transform: "translateX(-130%)" }, { transform: "translateX(130%)" }],
+                 { duration: 1100, easing: "cubic-bezier(.4,0,.2,1)", pseudoElement: "::after" });
+    }, 9000);
+  }
+}
+
+function pulseBand(band) {
+  // A finding worth attention gets one brief flash on the matching tile, so a
+  // CRITICAL is not lost among dozens of clean rows streaming past.
+  if (!window.anime) return;
+  const tile = document.querySelector(`.stat[data-band="${band}"]`);
+  if (!tile || band === "INFORMATIONAL" || band === "LOW") return;
+  anime({ targets: tile, scale: [1, 1.05, 1], duration: 520, easing: "easeOutQuad" });
+}
+
+boot();
 loadStatus();
