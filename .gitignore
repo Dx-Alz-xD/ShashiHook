@@ -15,3 +15,7 @@ intel/
 artifacts/local_ham.parquet
 data/nazario/
 .env
+
+# Large dataset files
+phishing emails/archive (6)/CEAS_08.csv
+phishing emails/archive (6)/phishing_email.csv
