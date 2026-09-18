@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Block committing a filled-in secret.
+#
+# .env.example is a template that gets committed; .env holds the real values
+# and is gitignored. They look nearly identical in an editor, and filling in
+# the wrong one has now happened three times — twice caught only by GitHub's
+# push protection, on a public repository.
+set -u
+KEYS='GEMINI_API_KEY|GROQ_API_KEY|IMAP_APP_PASSWORD|GMAIL_CLIENT_SECRET|GMAIL_CLIENT_ID|IMAP_USER'
+fail=0
+
+for f in $(git diff --cached --name-only --diff-filter=ACM); do
+  case "$f" in
+    .env) echo "BLOCKED: .env must never be committed."; fail=1; continue;;
+    *.env.example|.env.example|*.env.sample|*.env.template) ;;
+    *) continue;;
+  esac
+  # A key with anything after the '=' in a template is a real value.
+  hits=$(git show ":$f" 2>/dev/null | grep -nE "^[[:space:]]*($KEYS)[[:space:]]*=[[:space:]]*[^[:space:]]" || true)
+  if [ -n "$hits" ]; then
+    echo "BLOCKED: $f contains filled-in secret values:"
+    echo "$hits" | sed 's/=.*/=<redacted>/' | sed 's/^/    /'
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  cat <<'MSG'
+
+  Put real values in .env (gitignored), and leave .env.example blank.
+  To move them across:  python scripts/scrub_env.py
+  To override once:     git commit --no-verify
+MSG
+  exit 1
+fi
+exit 0
