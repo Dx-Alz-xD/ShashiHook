@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — ShashiHook</title>
+<meta name="description" content="Sign in to ShashiHook.">
+<meta property="og:title" content="Sign in — ShashiHook">
+<meta property="og:description" content="Sign in to ShashiHook.">
+<meta name="theme-color" content="#050609">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><circle cx=%2216%22 cy=%2216%22 r=%2210%22 fill=%22%237c6cff%22/></svg>">
+<link rel="stylesheet" href="/static/site.css">
+</head><body>
+<nav class="nav"><div class="nav-inner">
+  <a class="brand" href="/home"><span class="brand-dot"></span>ShashiHook<small>ArnosAI</small></a>
+  <div class="nav-links">
+    <a href="/about" class="hide-sm">About</a>
+    <a href="/agents" class="hide-sm">For agents</a>
+    <a href="/privacy" class="hide-sm">Privacy</a>
+    <span id="navauth"><a href="/login">Sign in</a></span>
+  </div>
+</div></nav>
+<div class="auth-shell"><div class="auth-card rise">
+  <h1>Sign in</h1>
+  <p class="sub">Your mailbox credentials stay encrypted on this machine.</p>
+  <div id="msg"></div>
+  <form id="form" autocomplete="on">
+    <div class="field"><label for="email">Email</label>
+      <input id="email" name="email" type="email" required autocomplete="username" autofocus></div>
+    <div class="field"><label for="password">Password</label>
+      <input id="password" name="password" type="password" required autocomplete="current-password"></div>
+    <button class="btn btn-primary btn-lg" style="width:100%" type="submit" id="go">Sign in</button>
+  </form>
+  <div class="demo-box">
+    <b>Demo account</b>
+    <p><code>demo@shashihook.app</code> · <code>shashihook-demo-2026</code></p>
+    <p>Connected to the project's own test mailbox, so you can see real scored mail
+       without handing over your own. It is shared and read-only.</p>
+    <button class="btn" style="width:100%;margin-top:10px" id="usedemo">Fill in the demo details</button>
+  </div>
+  <div class="auth-foot">No account? <a href="/signup">Create one</a></div>
+</div></div>
+<footer><div class="foot-inner">
+  <span>ShashiHook — engine ArnosAI. Analysis runs on your machine.</span>
+  <div class="foot-links">
+    <a href="/about">About</a><a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a><a href="/agents">Agents</a>
+    <a href="/robots.txt">robots.txt</a>
+  </div>
+</div></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+<script src="/static/site.js"></script><script src="/static/auth.js"></script>
+</body></html>

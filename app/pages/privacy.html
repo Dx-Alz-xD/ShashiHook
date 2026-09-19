@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — ShashiHook</title>
+<meta name="description" content="What ShashiHook stores, where it goes, and what it never collects.">
+<meta property="og:title" content="Privacy — ShashiHook">
+<meta property="og:description" content="What ShashiHook stores, where it goes, and what it never collects.">
+<meta name="theme-color" content="#050609">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><circle cx=%2216%22 cy=%2216%22 r=%2210%22 fill=%22%237c6cff%22/></svg>">
+<link rel="stylesheet" href="/static/site.css">
+</head><body>
+<nav class="nav"><div class="nav-inner">
+  <a class="brand" href="/home"><span class="brand-dot"></span>ShashiHook<small>ArnosAI</small></a>
+  <div class="nav-links">
+    <a href="/about" class="hide-sm">About</a>
+    <a href="/agents" class="hide-sm">For agents</a>
+    <a href="/privacy" class="hide-sm">Privacy</a>
+    <span id="navauth"><a href="/login">Sign in</a></span>
+  </div>
+</div></nav>
+<div class="wrap narrow prose">
+  <h2>Privacy</h2>
+  <p class="updated">A tool that reads your mail owes you a specific answer, not a general one.</p>
+
+  <h3>What is stored</h3>
+  <table>
+    <tr><th>Data</th><th>Where</th><th>Protection</th></tr>
+    <tr><td>Login password</td><td>Local database</td><td>Argon2id hash — not recoverable, by design</td></tr>
+    <tr><td>Mailbox app password</td><td>Local database</td><td>AES-256-GCM, key held in a separate 0600 file</td></tr>
+    <tr><td>Sender history</td><td>Local file, 0600</td><td>Counts and timestamps, no message text</td></tr>
+    <tr><td>Writing-style profiles</td><td>Local file, 0600</td><td>Rates and averages, no message text</td></tr>
+    <tr><td>Thread index</td><td>Local file</td><td>Short hashes, no readable content</td></tr>
+  </table>
+
+  <h3>The mailbox password is encrypted, not hashed</h3>
+  <p>This is the one place we cannot use a one-way hash: the scanner has to present that
+     password to your mail server on every connection. So it is encrypted and recoverable.</p>
+  <p><strong>What that means for you.</strong> Anyone who obtains both the database and the
+     key file can read your mailbox password. A stronger design would derive the key from
+     your login password so it is only readable while you are signed in — and that would
+     break the background watch daemon, which reconnects while nobody is signed in.
+     This build chose the daemon. Use a provider <strong>app password</strong> scoped to
+     mail, which you can revoke without touching your main account.</p>
+
+  <h3>What leaves this machine</h3>
+  <ul>
+    <li><strong>Your mail server</strong> — to fetch mail. Unavoidable.</li>
+    <li><strong>Gemini or Groq</strong> — only for written explanations, translation and
+        reading text inside images. Message content is sent for those features.
+        Set <code>LLM_TRANSLATE=0</code> and <code>LLM_READ_IMAGES=0</code> to stop it.</li>
+    <li><strong>VirusTotal</strong> — attachment hashes only, and only if you add a key.
+        A hash is not the file.</li>
+    <li><strong>Breach lookup</strong> — the first five characters of a hash, never your
+        address. The service cannot tell which account was checked.</li>
+  </ul>
+  <p>Scoring itself — models, rules, SHAP, similarity search, stylometry — is entirely
+     local. No analytics, no telemetry, no tracking of any kind.</p>
+
+  <h3>The demo account</h3>
+  <p>The demo account is shared and connected to the project's own test mailbox. Anything
+     visible there is visible to every visitor. Do not connect a real mailbox to it.</p>
+
+  <h3>Deleting your data</h3>
+  <p>Disconnect the mailbox in Settings to erase the stored credential immediately.
+     Deleting <code>artifacts/users.json</code> removes all accounts.</p>
+</div>
+<footer><div class="foot-inner">
+  <span>ShashiHook — engine ArnosAI. Analysis runs on your machine.</span>
+  <div class="foot-links">
+    <a href="/about">About</a><a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a><a href="/agents">Agents</a>
+    <a href="/robots.txt">robots.txt</a>
+  </div>
+</div></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+<script src="/static/site.js"></script>
+</body></html>

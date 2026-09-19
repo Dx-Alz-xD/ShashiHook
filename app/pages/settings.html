@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings — ShashiHook</title>
+<meta name="description" content="Connect a mailbox and manage your account.">
+<meta property="og:title" content="Settings — ShashiHook">
+<meta property="og:description" content="Connect a mailbox and manage your account.">
+<meta name="theme-color" content="#050609">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><circle cx=%2216%22 cy=%2216%22 r=%2210%22 fill=%22%237c6cff%22/></svg>">
+<link rel="stylesheet" href="/static/site.css">
+</head><body>
+<nav class="nav"><div class="nav-inner">
+  <a class="brand" href="/home"><span class="brand-dot"></span>ShashiHook<small>ArnosAI</small></a>
+  <div class="nav-links">
+    <a href="/about" class="hide-sm">About</a>
+    <a href="/agents" class="hide-sm">For agents</a>
+    <a href="/privacy" class="hide-sm">Privacy</a>
+    <span id="navauth"><a href="/login">Sign in</a></span>
+  </div>
+</div></nav>
+<div class="wrap narrow" style="padding:48px 24px 90px">
+  <h2>Settings</h2>
+  <p class="sub">Connect the mailbox ShashiHook should read.</p>
+  <div id="msg"></div>
+
+  <div class="card rise" style="margin-bottom:16px">
+    <h4>Mailbox</h4>
+    <p style="margin-bottom:18px">ShashiHook connects over IMAP with an <strong>app password</strong>,
+      not your account password. For Gmail, create one at
+      <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">myaccount.google.com/apppasswords</a>.</p>
+    <div id="mbstate"></div>
+    <form id="mbform">
+      <div class="field"><label for="host">IMAP server</label>
+        <input id="host" value="imap.gmail.com" required></div>
+      <div class="field"><label for="port">Port</label>
+        <input id="port" type="number" value="993" required></div>
+      <div class="field"><label for="user">Mailbox address</label>
+        <input id="user" type="email" required autocomplete="username"></div>
+      <div class="field"><label for="password">App password</label>
+        <input id="password" type="password" autocomplete="new-password">
+        <div class="hint">Encrypted with AES-256-GCM before it is written to disk.
+          The key is held outside the database. Leave blank to keep the stored one.</div></div>
+      <button class="btn btn-primary" type="submit" id="mbgo">Verify and save</button>
+      <button class="btn btn-danger" type="button" id="mbdel">Disconnect</button>
+    </form>
+  </div>
+
+  <div class="card rise">
+    <h4>Password</h4>
+    <form id="pwform" style="margin-top:14px">
+      <div class="field"><label for="cur">Current password</label>
+        <input id="cur" type="password" required autocomplete="current-password"></div>
+      <div class="field"><label for="new">New password</label>
+        <input id="new" type="password" required minlength="10" autocomplete="new-password"></div>
+      <button class="btn btn-primary" type="submit">Change password</button>
+    </form>
+  </div>
+
+  <div style="margin-top:26px"><button class="btn" id="signout">Sign out</button></div>
+</div>
+<footer><div class="foot-inner">
+  <span>ShashiHook — engine ArnosAI. Analysis runs on your machine.</span>
+  <div class="foot-links">
+    <a href="/about">About</a><a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a><a href="/agents">Agents</a>
+    <a href="/robots.txt">robots.txt</a>
+  </div>
+</div></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+<script src="/static/site.js"></script><script src="/static/settings.js"></script>
+</body></html>

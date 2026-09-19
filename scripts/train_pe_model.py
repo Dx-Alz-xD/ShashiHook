@@ -1,16 +1,25 @@
-"""Train a PE classifier on malware/malware.csv.
+"""Train a PE classifier on malware/malware.csv -- KEPT ONLY TO REPRODUCE THE AUDIT.
 
-138,047 Windows executables with 54 static header features have been sitting
-unused since the first day. This turns `malware_delivery` from an extension
-check into an actual verdict on the bytes.
+The model this produces is deliberately not used anywhere. It reaches 0.9998
+ROC-AUC and that number is an artefact of how the dataset was assembled:
 
-What it cannot do, stated plainly: these are static PE header features, so the
-model reasons about how a binary is laid out -- section entropy, import counts,
-resource sizes -- not what it does. Packed legitimate software and packed
-malware look alike to it, and it says nothing at all about an ISO, a LNK, a
-macro document or an HTML smuggler, which is how most payloads arrive now.
-It is one signal for one file type, held alongside VirusTotal rather than
-instead of it.
+    legitimate samples:  memtest.exe, ose.exe, setup.exe, DW20.EXE
+    malicious samples:   VirusShare_4a400b747afe..., VirusShare_9bd57c82...
+
+Two different collection processes, so the strongest features separate the
+COLLECTIONS rather than hostile from harmless. SizeOfStackReserve is 0x100000
+for 94% of malicious and 0x40000 for 65% of legitimate -- a linker default.
+ExportNb is 0 for 99% of malicious, which means they are EXEs and the
+legitimate set has DLLs. Removing all nineteen build-environment fields moves
+held-out AUC from 0.9998 to 0.9997, because the contamination is everywhere,
+not concentrated in a few columns.
+
+Run scripts/build_pe_percentiles.py instead. It extracts the one property that
+belongs to the bytes rather than the collection -- section entropy -- and
+sentinel/pe.py reports it as a percentile against ordinary Windows binaries.
+
+Validating a real PE classifier needs a dataset built to avoid this, EMBER or
+SOREL, where both classes are collected the same way.
 """
 from __future__ import annotations
 

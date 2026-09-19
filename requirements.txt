@@ -1,9 +1,12 @@
+argon2-cffi==25.1.0
 beautifulsoup4==4.15.0
+cryptography
 fastapi==0.141.1
 google-api-python-client==2.200.0
 google-auth-oauthlib==1.4.1
 google-auth==2.58.0
 googleapis-common-protos==1.75.3
+itsdangerous==2.2.0
 joblib==1.6.0
 lightgbm==4.7.0
 lxml==6.1.3

@@ -24,3 +24,8 @@ artifacts/sender_profiles.json
 data/kaggle/
 *.csv.gz
 artifacts/similarity_index.npz
+artifacts/users.json
+artifacts/master.key
+eval/gold_set_silver.csv
+artifacts/learners.json
+artifacts/practice_pool.json

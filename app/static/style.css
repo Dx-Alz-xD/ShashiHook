@@ -1059,3 +1059,235 @@ input[type="number"] { width: 78px; }
 }
 .nb-tag.ben { background: #10291f; color: #4cc78d; }
 .nb-src { font-size: 10.5px; color: #4d5466; }
+
+/* ------------------------------------------------------- account menu */
+.acct { position: relative; margin-left: 6px; }
+.acct-btn {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 9px 5px 5px; border-radius: 99px;
+  background: var(--bg-panel); border: 1px solid var(--line);
+  color: var(--text-dim); font: inherit; font-size: 12px; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.acct-btn:hover { background: var(--bg-hover); border-color: #2c3342; color: var(--text); }
+.acct-av {
+  width: 21px; height: 21px; border-radius: 50%; display: grid; place-items: center;
+  background: linear-gradient(140deg, #8878ff, #4dd4ff);
+  color: #0a0c12; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+}
+.acct-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.acct-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 90;
+  min-width: 236px; padding: 6px;
+  background: var(--bg-panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  /* Animated with transform only — an opacity entrance that loses its frame
+     leaves an invisible menu that still swallows clicks. */
+  transform-origin: top right;
+}
+.acct-menu[hidden] { display: none; }
+.acct-head { padding: 9px 10px 11px; border-bottom: 1px solid var(--line-soft); margin-bottom: 5px; }
+.acct-email { font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.acct-mbx { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+.acct-menu a, .acct-menu button {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: none; border: 0; color: var(--text-dim);
+  font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: none;
+}
+.acct-menu a:hover, .acct-menu button:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+.acct-sep { height: 1px; background: var(--line-soft); margin: 5px 0; }
+.acct-danger { color: #ff8fa0 !important; }
+.acct-danger:hover { background: #1c1116 !important; }
+.acct-demo {
+  display: inline-block; margin-top: 5px; padding: 1px 6px; border-radius: 99px;
+  background: #241d10; color: var(--medium); font-size: 9.5px;
+  letter-spacing: .08em; text-transform: uppercase;
+}
+
+@media (max-width: 760px) { .acct-name { display: none; } }
+
+/* The console's brand is a link home. It must not pick up link styling —
+   underline or accent colour on a wordmark reads as a mistake. */
+.brand-link {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  color: inherit; text-decoration: none; border-radius: 9px;
+  padding: 2px 6px 2px 2px; margin-left: -2px;
+  transition: background .15s;
+}
+.brand-link:hover { background: var(--bg-hover); text-decoration: none; }
+.brand-link:hover h1 { color: var(--text); }
+
+/* --------------------------------------------------------------- learner */
+.ln-cta {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  border-left: 3px solid var(--accent);
+}
+.ln-cta .btn { margin-left: auto; white-space: nowrap; }
+
+.pg.learn { max-width: 860px; }
+.learn-body { padding: 20px 22px 28px; overflow-y: auto; }
+
+.ln-prog {
+  padding: 16px; border-radius: var(--radius);
+  background: var(--bg-raised); border: 1px solid var(--line-soft);
+  margin-bottom: 20px;
+}
+.ln-stats { display: flex; gap: 26px; margin-bottom: 16px; flex-wrap: wrap; }
+.ln-stats div { display: flex; flex-direction: column; }
+.ln-stats b { font-size: 19px; font-weight: 640; letter-spacing: -.02em; text-transform: capitalize; }
+.ln-stats span { font-size: 10px; color: var(--text-faint); letter-spacing: .1em; text-transform: uppercase; }
+
+/* One column per tactic. Height is accuracy, so a short bar is a weak spot
+   and an absent bar is something never practised — a different thing. */
+.ln-bars { display: flex; gap: 5px; align-items: flex-end; height: 70px; }
+.ln-bar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
+.ln-bar-fill { background: linear-gradient(180deg, #8878ff, #4dd4ff); border-radius: 3px 3px 0 0; min-height: 2px; transition: height .4s ease; }
+.ln-bar-fill.weak { background: linear-gradient(180deg, #ff6b7d, #d64c5e); }
+.ln-bar span {
+  font-size: 8px; color: var(--text-faint); text-align: center;
+  margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.ln-msg {
+  display: flex; gap: 13px; align-items: center; padding: 12px 14px;
+  border-radius: var(--radius); background: var(--bg-raised);
+  border: 1px solid var(--line-soft); margin-bottom: 18px;
+}
+.ln-score { font-size: 21px; font-weight: 640; color: var(--medium); font-variant-numeric: tabular-nums; }
+.ln-subj { font-size: 13.5px; color: var(--text); }
+.ln-from { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.ln-brief { font-size: 14px; color: var(--text-dim); line-height: 1.65; }
+.ln-focus { font-size: 11.5px; color: var(--text-faint); margin: 12px 0 18px; }
+.ln-focus span {
+  display: inline-block; padding: 3px 9px; margin: 3px 5px 0 0; border-radius: 99px;
+  background: #1a1630; color: #b0a4ff; font-size: 11px;
+}
+
+.ln-qs { display: flex; flex-direction: column; gap: 12px; }
+.ln-q { padding: 15px; border-radius: var(--radius); background: var(--bg-raised); border: 1px solid var(--line-soft); }
+.ln-q-top { display: flex; gap: 11px; margin-bottom: 12px; }
+.ln-n {
+  flex: 0 0 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--bg-panel); border: 1px solid var(--line);
+  font-size: 11px; color: var(--text-dim);
+}
+.ln-qt { font-size: 14px; color: var(--text); line-height: 1.55; }
+.ln-opts { display: flex; flex-direction: column; gap: 7px; }
+.ln-o {
+  text-align: left; font: inherit; font-size: 13px; line-height: 1.5;
+  padding: 10px 13px; border-radius: 8px; cursor: pointer;
+  background: var(--bg-panel); border: 1px solid var(--line); color: var(--text-dim);
+  transition: background .15s, border-color .15s;
+}
+.ln-o:hover:not(:disabled) { background: var(--bg-hover); border-color: #2c3342; color: var(--text); }
+.ln-o:disabled { cursor: default; }
+.ln-o.right { background: #10291f; border-color: #2f9e6b; color: #8fe0b4; }
+.ln-o.wrong { background: #2a1116; border-color: #a3364a; color: #e8a0ad; }
+.ln-why {
+  display: none; font-size: 13px; color: var(--text-dim); line-height: 1.65;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft);
+}
+.ln-why.show { display: block; }
+
+.ln-pattern {
+  margin-top: 20px; padding: 17px; border-radius: var(--radius);
+  background: var(--bg-raised); border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--accent-2);
+}
+.ln-ptag { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-2); }
+.ln-pattern h4 { margin: 7px 0 9px; font-size: 16px; }
+.ln-pattern p { margin: 0; font-size: 13.5px; color: var(--text-dim); line-height: 1.65; }
+.ln-tells { margin: 12px 0 0; padding-left: 19px; }
+.ln-tells li { font-size: 13px; color: var(--text-dim); margin-bottom: 5px; line-height: 1.55; }
+.ln-else { margin-top: 11px !important; font-style: italic; color: var(--text-faint) !important; }
+.ln-take {
+  margin-top: 16px; padding: 15px 17px; border-radius: var(--radius);
+  background: linear-gradient(90deg, #171429, #0d1015);
+  border: 1px solid #2a2450; border-left: 3px solid var(--accent);
+  font-size: 14.5px; color: var(--text); line-height: 1.6;
+}
+.ln-empty { padding: 34px 6px; text-align: center; }
+.ln-empty h3 { margin: 0 0 9px; }
+
+/* --------------------------------------------------------- practice modes */
+.px-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
+.px-tab {
+  padding: 7px 13px; border-radius: 99px; font: inherit; font-size: 12.5px;
+  background: var(--bg-panel); border: 1px solid var(--line);
+  color: var(--text-dim); cursor: pointer; transition: background .15s, color .15s;
+}
+.px-tab:hover { background: var(--bg-hover); color: var(--text); }
+.px-tab.on { background: #1d1a3a; border-color: var(--accent); color: #c9c1ff; }
+
+.px-prompt { font-size: 15px; color: var(--text); margin: 0 0 14px; }
+.px-sim {
+  font-size: 11.5px; color: var(--text-faint); margin-left: 9px;
+  padding: 2px 9px; border-radius: 99px; background: var(--bg-panel);
+}
+
+.px-msg {
+  padding: 14px 16px; border-radius: var(--radius);
+  background: var(--bg-raised); border: 1px solid var(--line-soft);
+  margin-bottom: 14px;
+}
+.px-from { font-size: 11.5px; color: var(--text-faint); }
+.px-subj { font-size: 14.5px; color: var(--text); margin: 4px 0 10px; font-weight: 550; }
+.px-body {
+  font-size: 13px; color: var(--text-dim); line-height: 1.7;
+  max-height: 280px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+}
+.px-src { font-size: 10px; color: #3f4658; margin-top: 9px; letter-spacing: .04em; }
+.px-msg.clickable .px-body { cursor: crosshair; }
+.px-msg.clickable .px-body span:hover { background: #262b3a; }
+.px-body span.found { background: #16452f; color: #8fe0b4; border-radius: 2px; }
+.px-body span.missed { background: #3a1f28; color: #e8a0ad; border-radius: 2px; }
+
+.px-choices { display: flex; gap: 9px; flex-wrap: wrap; }
+.px-choice {
+  flex: 1; min-width: 160px; padding: 12px 15px; border-radius: 9px;
+  font: inherit; font-size: 13.5px; cursor: pointer;
+  background: var(--bg-panel); border: 1px solid var(--line); color: var(--text-dim);
+  transition: background .15s, border-color .15s;
+}
+.px-choice:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.px-choice:disabled { cursor: default; }
+.px-choice.right { background: #10291f; border-color: #2f9e6b; color: #8fe0b4; }
+.px-choice.wrong { background: #2a1116; border-color: #a3364a; color: #e8a0ad; }
+
+.px-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.px-col { display: flex; flex-direction: column; }
+.px-pick {
+  padding: 9px; margin-bottom: 9px; border-radius: 8px;
+  font: inherit; font-size: 13px; cursor: pointer;
+  background: var(--bg-panel); border: 1px solid var(--line); color: var(--text-dim);
+}
+.px-pick:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.px-pick.right { background: #10291f; border-color: #2f9e6b; color: #8fe0b4; }
+.px-pick.wrong { background: #2a1116; border-color: #a3364a; color: #e8a0ad; }
+
+.px-verdict {
+  padding: 12px 14px; border-radius: 9px; margin: 14px 0;
+  font-size: 13.5px; line-height: 1.6;
+}
+.px-verdict.ok { background: #10291f; border: 1px solid #1d3a2a; color: #8fe0b4; }
+.px-verdict.no { background: #1c1116; border: 1px solid #3a2028; color: #e8a0ad; }
+.px-verdict b { color: #fff; margin-right: 6px; }
+
+.px-tells { margin-bottom: 14px; }
+.px-tells b { display: block; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 7px; }
+.px-tell {
+  display: inline-block; margin: 0 6px 6px 0; padding: 4px 10px; border-radius: 99px;
+  background: var(--bg-panel); border: 1px solid var(--line);
+  font-size: 12px; color: var(--text);
+}
+.px-tell em { color: var(--text-faint); font-style: normal; font-size: 10px; margin-left: 7px; }
+
+.px-timer {
+  font-family: var(--mono); font-size: 12px; color: var(--text-faint);
+  margin-bottom: 12px; letter-spacing: .04em;
+}
+.px-timer #px-clock { color: var(--medium); font-size: 15px; }
+
+@media (max-width: 720px) { .px-pair { grid-template-columns: 1fr; } }

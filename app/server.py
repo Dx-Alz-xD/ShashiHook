@@ -21,8 +21,9 @@ import time
 from pathlib import Path
 from typing import AsyncIterator
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import Cookie, FastAPI, HTTPException, Request
+from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
+                               RedirectResponse, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 from pydantic import BaseModel
@@ -41,7 +42,10 @@ from sentinel.profiling.profile import ProfileCache, profile as build_profile
 from sentinel.report.incident import to_dict, to_markdown
 from sentinel.settings import settings
 
+from .accounts import COOKIE, current_user, router as auth_router, user_settings
+
 STATIC = Path(__file__).parent / "static"
+PAGES = Path(__file__).parent / "pages"
 
 app = FastAPI(title="ShashiHook", version="1.0",
               description="Email threat analysis desktop app powered by ArnosAI")
@@ -228,6 +232,7 @@ def _files_block(a: Analysis) -> dict:
             "archive_hides_executable": f.archive_hides_executable,
             "sha256": f.sha256,
             "notes": f.notes,
+            "pe": getattr(f, "pe", {}) or {},
             "scan": ({"known": v.known, "malicious": v.malicious,
                       "suspicious": v.suspicious, "harmless": v.harmless,
                       "undetected": v.undetected, "type_tag": v.type_tag,
@@ -278,9 +283,137 @@ def _style_block(a: Analysis) -> dict:
 
 
 # ----------------------------------------------------------------- endpoints
+app.include_router(auth_router)
+
+
+def _page(name: str, status: int = 200) -> FileResponse:
+    """Serve a page, and never let a browser cache it.
+
+    What "/" returns depends on the session: the landing page for a stranger,
+    the console for someone signed in. FileResponse sends an ETag and a
+    Last-Modified and no Cache-Control, so a browser applies heuristic
+    freshness and keeps serving whichever version it saw first -- which is why
+    signing in and clicking Dashboard landed back on the marketing page.
+    Same failure the static files hit; see NoCacheStatic below.
+    """
+    return FileResponse(PAGES / name, status_code=status, headers=NO_STORE)
+
+
+NO_STORE = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
+
+
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC / "index.html")
+def index(session: str | None = Cookie(default=None, alias=COOKIE)) -> FileResponse:
+    """The dashboard, or the landing page for anyone not signed in.
+
+    Serving the marketing page to a stranger rather than redirecting keeps the
+    URL stable and means a shared link to the site does not bounce.
+    """
+    return (FileResponse(STATIC / "index.html", headers=NO_STORE)
+            if current_user(session) else _page("landing.html"))
+
+
+@app.get("/home")
+def home_page() -> FileResponse:
+    """The landing page, always.
+
+    "/" is session-dependent -- console when signed in, landing when not -- so
+    the brand cannot point there and reliably show the marketing page. This
+    route is the stable address for it, and is what the logo links to from
+    everywhere.
+    """
+    return _page("landing.html")
+
+
+@app.get("/login")
+def login_page(session: str | None = Cookie(default=None, alias=COOKIE)):
+    if current_user(session):
+        return RedirectResponse("/", status_code=303)
+    return _page("login.html")
+
+
+@app.get("/signup")
+def signup_page(session: str | None = Cookie(default=None, alias=COOKIE)):
+    if current_user(session):
+        return RedirectResponse("/", status_code=303)
+    return _page("signup.html")
+
+
+@app.get("/settings")
+def settings_page(session: str | None = Cookie(default=None, alias=COOKIE)):
+    if not current_user(session):
+        return RedirectResponse("/login", status_code=303)
+    return _page("settings.html")
+
+
+@app.get("/about")
+def about_page() -> FileResponse:
+    return _page("about.html")
+
+
+@app.get("/privacy")
+def privacy_page() -> FileResponse:
+    return _page("privacy.html")
+
+
+@app.get("/terms")
+def terms_page() -> FileResponse:
+    return _page("terms.html")
+
+
+@app.get("/agents")
+def agents_page() -> FileResponse:
+    return _page("agents.html")
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots() -> str:
+    """Crawlers may read what is public and nothing that needs a session.
+
+    The disallowed paths are not a security control -- the session check is --
+    but pointing a crawler at a login form wastes everyone's time.
+    """
+    return (
+        "User-agent: *\n"
+        "Allow: /$\n"
+        "Allow: /home\n"
+        "Allow: /about\n"
+        "Allow: /privacy\n"
+        "Allow: /terms\n"
+        "Allow: /agents\n"
+        "Disallow: /api/\n"
+        "Disallow: /login\n"
+        "Disallow: /signup\n"
+        "Disallow: /settings\n"
+        "\n"
+        "# Machine-readable description of this service for AI agents:\n"
+        "# /agents.md\n"
+        "Sitemap: /sitemap.xml\n")
+
+
+@app.get("/agents.md", response_class=PlainTextResponse)
+@app.get("/llms.txt", response_class=PlainTextResponse)
+def agents_md() -> str:
+    """What an automated reader should know before describing this service."""
+    return (PAGES / "agents.md").read_text()
+
+
+@app.get("/sitemap.xml", response_class=PlainTextResponse)
+def sitemap() -> str:
+    urls = ["/", "/home", "/about", "/privacy", "/terms", "/agents"]
+    body = "".join(f"  <url><loc>{u}</loc></url>\n" for u in urls)
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f'{body}</urlset>\n')
+
+
+@app.exception_handler(404)
+async def not_found(request: Request, exc):
+    """A page for people, JSON for anything under /api."""
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"error": "no such endpoint",
+                             "path": request.url.path}, status_code=404)
+    return _page("404.html", 404)
 
 
 @app.get("/api/status")
@@ -338,7 +471,7 @@ def message_detail(mid: str) -> dict:
 
 
 async def _scan_events(source: str, limit: int, query: str,
-                       mailbox: str) -> AsyncIterator[str]:
+                       mailbox: str, cfg) -> AsyncIterator[str]:
     """Server-sent events, one per message, emitted as it is scored.
 
     Fetching is blocking IMAP work, so it runs in a thread; scoring is yielded
@@ -357,7 +490,7 @@ async def _scan_events(source: str, limit: int, query: str,
             from sentinel.ingest import imap_box as adapter
 
         kw = {"mailbox": mailbox} if source != "gmail" else {}
-        msgs = await asyncio.to_thread(adapter.fetch, settings, query, limit, **kw)
+        msgs = await asyncio.to_thread(adapter.fetch, cfg, query, limit, **kw)
         yield emit("phase", {"phase": "fetched", "count": len(msgs),
                              "message": f"{len(msgs)} messages retrieved"})
 
@@ -380,10 +513,20 @@ async def _scan_events(source: str, limit: int, query: str,
 
 @app.get("/api/scan/stream")
 async def scan_stream(source: str = "", limit: int = 50,
-                      query: str = "", mailbox: str = "INBOX") -> StreamingResponse:
-    src = source or ("imap" if settings.has_imap else "gmail")
+                      query: str = "", mailbox: str = "INBOX",
+                      session: str | None = Cookie(default=None, alias=COOKIE)
+                      ) -> StreamingResponse:
+    # Which mailbox this reads is decided here and nowhere else. An
+    # unauthenticated request never reaches the mail server at all.
+    user = current_user(session)
+    if user is None:
+        raise HTTPException(401, "sign in to scan a mailbox")
+    cfg = user_settings(user)
+    if not (cfg.imap_user and cfg.imap_password):
+        raise HTTPException(400, "connect a mailbox first — Settings → Mailbox")
+    src = source or ("imap" if cfg.has_imap else "gmail")
     return StreamingResponse(
-        _scan_events(src, limit, query or settings.query, mailbox),
+        _scan_events(src, limit, query or cfg.query, mailbox, cfg),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
                  "Connection": "keep-alive"})
@@ -624,6 +767,140 @@ async def drill(mid: str, force: bool = False) -> dict:
     if d.ok:
         _drills[mid] = out
     return out
+
+
+# ------------------------------------------------------------------ learner
+_learners = None
+_lessons: dict[str, dict] = {}
+
+
+def learners():
+    global _learners
+    if _learners is None:
+        from sentinel.learning import LearnerStore
+        _learners = LearnerStore.load()
+    return _learners
+
+
+class AnswerBody(BaseModel):
+    tactic: str
+    correct: bool
+
+
+@app.get("/api/learn/profile")
+def learn_profile(session: str | None = Cookie(default=None, alias=COOKIE)) -> dict:
+    u = current_user(session)
+    if u is None:
+        raise HTTPException(401, "sign in to continue")
+    return learners().get(u.email).public()
+
+
+@app.get("/api/learn/{mid}")
+async def learn_lesson(mid: str, refresh: bool = False,
+                       session: str | None = Cookie(default=None, alias=COOKIE)) -> dict:
+    """A lesson built from this message and this learner's weak spots.
+
+    Cached per message AND per learner: the same email produces different
+    questions for two people, because the questions are aimed at what each of
+    them keeps getting wrong.
+    """
+    from sentinel.learning import build as build_lesson
+    u = current_user(session)
+    if u is None:
+        raise HTTPException(401, "sign in to continue")
+    a = _cache.get(mid)
+    if a is None:
+        raise HTTPException(404, "not in this session's cache — rescan to load it")
+    profile = learners().get(u.email)
+    key = f"{u.email}\x00{mid}"
+    if key in _lessons and not refresh:
+        return _lessons[key]
+    lesson = await asyncio.to_thread(build_lesson, a, profile, settings)
+    out = lesson.to_dict()
+    out["profile"] = profile.public()
+    out["message"] = {"subject": a.email.subject, "sender": a.email.sender,
+                      "score": a.severity.score, "band": a.severity.band,
+                      "vector": a.vector.name}
+    if lesson.ok:
+        _lessons[key] = out
+        profile.lessons_done += 1
+        learners().save()
+    return out
+
+
+@app.post("/api/learn/answer")
+def learn_answer(body: AnswerBody,
+                 session: str | None = Cookie(default=None, alias=COOKIE)) -> dict:
+    """Record one answer. This is what makes the next lesson different."""
+    from sentinel.learning import TACTICS
+    u = current_user(session)
+    if u is None:
+        raise HTTPException(401, "sign in to continue")
+    if body.tactic not in TACTICS:
+        raise HTTPException(400, f"unknown tactic {body.tactic!r}")
+    p = learners().get(u.email)
+    p.record(body.tactic, body.correct)
+    learners().save()
+    return p.public()
+
+
+class PracticeAnswer(BaseModel):
+    mode: str
+    item_id: str
+    said_hostile: bool | None = None
+    offset: int | None = None
+
+
+@app.get("/api/practice/{mode}")
+def practice(mode: str, n: int = 8,
+             session: str | None = Cookie(default=None, alias=COOKIE)) -> dict:
+    """One exercise, drawn from 81,234 labelled corpus messages.
+
+    No provider call: every mode here is graded against the corpus label or the
+    lexicon spans, both of which are already known. That makes practice free,
+    instant, and available when Gemini and Groq are both down.
+    """
+    from sentinel.practice import MODES, pool
+    u = current_user(session)
+    if u is None:
+        raise HTTPException(401, "sign in to continue")
+    if mode not in MODES:
+        raise HTTPException(404, f"no such mode — try one of {', '.join(MODES)}")
+    pl = pool()
+    if not pl.ready:
+        raise HTTPException(503, "practice pool not built — run "
+                                 "scripts/build_practice_pool.py")
+    ex = pl.build(mode, n=max(4, min(n, 16)))
+    if ex is None:
+        raise HTTPException(503, f"not enough material for {mode}")
+    return ex
+
+
+@app.post("/api/practice/answer")
+def practice_answer(body: PracticeAnswer,
+                    session: str | None = Cookie(default=None, alias=COOKIE)) -> dict:
+    """Mark one answer and fold it into the same profile the lessons use.
+
+    Deliberately shared: someone who keeps missing urgency in the timed triage
+    should get urgency questions in their next written lesson. Two separate
+    scoreboards would each be half-blind.
+    """
+    from sentinel.practice import pool
+    u = current_user(session)
+    if u is None:
+        raise HTTPException(401, "sign in to continue")
+    pl = pool()
+    if body.mode == "highlight":
+        res = pl.mark_click(body.item_id, int(body.offset or -1))
+    else:
+        res = pl.mark_label(body.item_id, bool(body.said_hostile))
+    if res is None:
+        raise HTTPException(404, "unknown practice item")
+    prof = learners().get(u.email)
+    prof.record(res.get("tactic") or "pretext", bool(res["correct"]))
+    learners().save()
+    res["profile"] = prof.public()
+    return res
 
 
 class NoCacheStatic(StaticFiles):

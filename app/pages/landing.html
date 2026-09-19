@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShashiHook — see why an email was flagged</title>
+<meta name="description" content="Email threat analysis that explains itself: severity, attack vector, exact SHAP attribution, and what the attacker would have done next.">
+<meta property="og:title" content="ShashiHook — see why an email was flagged">
+<meta property="og:description" content="Email threat analysis that explains itself: severity, attack vector, exact SHAP attribution, and what the attacker would have done next.">
+<meta name="theme-color" content="#050609">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><circle cx=%2216%22 cy=%2216%22 r=%2210%22 fill=%22%237c6cff%22/></svg>">
+<link rel="stylesheet" href="/static/site.css">
+</head><body>
+<nav class="nav"><div class="nav-inner">
+  <a class="brand" href="/home"><span class="brand-dot"></span>ShashiHook<small>ArnosAI</small></a>
+  <div class="nav-links">
+    <a href="/about" class="hide-sm">About</a>
+    <a href="/agents" class="hide-sm">For agents</a>
+    <a href="/privacy" class="hide-sm">Privacy</a>
+    <span id="navauth"><a href="/login">Sign in</a></span>
+  </div>
+</div></nav>
+<div class="wrap">
+  <div class="hero">
+    <div class="pill"><b>●</b> 163 signals · 18 attack vectors · 32 deterministic rules</div>
+    <h1 class="rise">Every verdict<br>shows its working.</h1>
+    <p class="lede rise">ShashiHook reads your mailbox and explains each message: how dangerous,
+      what kind of attack, which exact words and headers moved the score — and what would
+      have happened if you had replied.</p>
+    <div class="hero-actions rise">
+      <span id="cta-anon">
+        <a class="btn btn-primary btn-lg" href="/signup">Create an account</a>
+        <button class="btn btn-lg" id="trydemo" type="button">Try the demo mailbox</button>
+      </span>
+      <span id="cta-user" hidden>
+        <a class="btn btn-primary btn-lg" href="/">Open the dashboard</a>
+        <a class="btn btn-lg" href="/settings">Settings</a>
+      </span>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-n" data-count="163">0</div><div class="stat-l">signals</div></div>
+    <div class="stat"><div class="stat-n" data-count="81234">0</div><div class="stat-l">training messages</div></div>
+    <div class="stat"><div class="stat-n" data-count="18">0</div><div class="stat-l">attack vectors</div></div>
+    <div class="stat"><div class="stat-n" data-count="32">0</div><div class="stat-l">deterministic rules</div></div>
+  </div>
+
+  <section>
+    <h2>It does not just say "spam".</h2>
+    <p class="sub">A score with no reasoning is a number you either believe or ignore.
+       Everything below is evidence you can check.</p>
+    <div class="grid">
+      <div class="card rise"><span class="tag">Attribution</span><h4>Exact SHAP, not a guess</h4>
+        <p>Every point of the score is attributed to a specific feature using exact
+           TreeSHAP. The attributions sum to the prediction — asserted to 1e-6 in the
+           test suite, so the explanation cannot drift from the model.</p></div>
+      <div class="card rise"><span class="tag">Language</span><h4>Any language</h4>
+        <p>A scam written in Hindi or Spanish is detected, translated, then scored by the
+           same English lexicons. Detection runs locally with no model and no API call.</p>
+        <p class="metric">Spanish phish: 20.0 LOW → 48.5 MEDIUM</p></div>
+      <div class="card rise"><span class="tag">Vision</span><h4>Text hidden in images</h4>
+        <p>Scam text pasted into a PNG is invisible to every word-based scanner. QR codes
+           are decoded locally and exactly; image text is transcribed and scored.</p>
+        <p class="metric">image-only phish: 1.5 benign → 65.0 flagged</p></div>
+      <div class="card rise"><span class="tag">Identity</span><h4>Writing-style fingerprints</h4>
+        <p>When a colleague's real account is taken over, every header check still passes.
+           ShashiHook learns how each sender writes and notices when a message does not fit.</p>
+        <p class="metric">0.915 AUC across 362 real mailboxes</p></div>
+      <div class="card rise"><span class="tag">Memory</span><h4>"You have seen this before"</h4>
+        <p>Each message is matched against 64,988 labelled examples by meaning rather than
+           shared words, and the closest known scam is shown to you as evidence.</p></div>
+      <div class="card rise"><span class="tag">Consequence</span><h4>What happens next</h4>
+        <p>For anything hostile, the escalation is spelled out: what they ask for first,
+           when money or credentials appear, and the easiest point to break the chain.</p></div>
+    </div>
+  </section>
+
+</div>
+<footer><div class="foot-inner">
+  <span>ShashiHook — engine ArnosAI. Analysis runs on your machine.</span>
+  <div class="foot-links">
+    <a href="/about">About</a><a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a><a href="/agents">Agents</a>
+    <a href="/robots.txt">robots.txt</a>
+  </div>
+</div></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+<script src="/static/site.js"></script><script>document.body.dataset.page="landing";</script>
+</body></html>

@@ -748,3 +748,106 @@ def test_neighbours_are_never_a_model_feature():
     leaked = [n for n in FEATURE_NAMES
               if "neighbour" in n or "similar" in n or n.startswith("nn_")]
     assert leaked == [], f"retrieval leaked into the feature vector: {leaked}"
+
+
+# ------------------------------------------------------------------- PE
+def _fake_pe(body: bytes, name: bytes = b".text\0\0\0") -> bytes:
+    """A minimal but structurally real PE image."""
+    import struct
+    dos = b"MZ" + b"\0" * 58 + struct.pack("<I", 64)
+    coff = struct.pack("<IHHIIIHH", 0x00004550, 0x014C, 1, 0, 0, 0, 224, 0x0102)
+    opt = struct.pack("<H", 0x10B) + b"\0" * 222
+    sec = name + struct.pack("<IIII", len(body), 0x1000, len(body),
+                             64 + 24 + 224 + 40) + b"\0" * 16
+    return dos + coff + opt + sec + body
+
+
+def test_entropy_separates_packed_from_ordinary_code():
+    """Entropy is a property of the bytes, not of who collected them.
+
+    This is the one signal that survived the audit of the malware dataset,
+    whose classes came from a Windows install and a VirusShare dump and whose
+    'best' features separated the collections.
+    """
+    import random
+    from sentinel.pe import PACKED_ENTROPY, parse
+    code = parse(_fake_pe(bytes((0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08) * 900)))
+    random.seed(1)
+    packed = parse(_fake_pe(bytes(random.randrange(256) for _ in range(5400))))
+    assert code.ok and packed.ok
+    assert code.max_entropy < PACKED_ENTROPY < packed.max_entropy
+    assert any("compressed or encrypted" in n for n in packed.notes)
+
+
+def test_pe_parser_fails_closed_on_rubbish():
+    """A malformed file must return a reason, never raise into the analyser."""
+    from sentinel.pe import parse
+    for blob in (b"", b"%PDF-1.7", b"MZ", b"MZ" + b"\xff" * 200):
+        h = parse(blob)
+        assert h.ok is False and h.error
+
+
+def test_entropy_is_reported_as_a_percentile_not_a_verdict():
+    """A percentile invites thought; a probability invites stopping.
+
+    The reference population must be named, because it is Windows program
+    files rather than "all software".
+    """
+    from sentinel.pe import rank
+    _, high = rank(7.97)
+    _, low = rank(2.25)
+    assert "legitimate Windows program files" in high
+    assert "%" in high and "malware" not in high.lower()
+    assert "unremarkable" in low
+
+
+def test_the_discredited_pe_model_is_not_reachable():
+    """It scored 0.9998 by separating VirusShare from a Windows install.
+
+    It was never callable -- nothing produced its 54 header fields -- and it is
+    now removed rather than left looking usable.
+    """
+    import sentinel.files as files
+    assert not hasattr(files, "pe_score")
+    assert not hasattr(files, "file_features")
+
+
+# ------------------------------------------------------------- gold set
+def test_silver_labels_keep_only_agreement(tmp_path, monkeypatch):
+    """A label is silver only when two independent models chose the same thing."""
+    import pandas as pd
+    from sentinel.config import EVAL_DIR
+    import scripts.eval_gold as eg
+    rows = pd.DataFrame([
+        {"agree": True, "silver_vector": "credential_phishing",
+         "vector": "credential_phishing", "sample_bucket": "high_confidence",
+         "a_vector": "credential_phishing", "b_vector": "credential_phishing"},
+        {"agree": False, "silver_vector": "",
+         "vector": "spam_unwanted", "sample_bucket": "unresolved",
+         "a_vector": "benign", "b_vector": "recon_probe"},
+    ])
+    d = tmp_path / "eval"
+    d.mkdir()
+    rows.to_csv(d / "gold_set_silver.csv", index=False)
+    monkeypatch.setattr(eg, "EVAL_DIR", d)
+    df, kind = eg.load()
+    assert kind == "silver"
+    assert len(df) == 1, "the disagreement must not become a label"
+    assert df.iloc[0]["true_vector"] == "credential_phishing"
+
+
+def test_human_labels_outrank_silver(tmp_path, monkeypatch):
+    import pandas as pd
+    import scripts.eval_gold as eg
+    d = tmp_path / "eval"
+    d.mkdir()
+    pd.DataFrame([{"agree": True, "silver_vector": "spam_unwanted",
+                   "vector": "spam_unwanted", "a_vector": "spam_unwanted",
+                   "b_vector": "spam_unwanted"}]).to_csv(
+        d / "gold_set_silver.csv", index=False)
+    pd.DataFrame([{"true_vector": "credential_phishing",
+                   "vector": "spam_unwanted"}]).to_csv(
+        d / "gold_set_labelled.csv", index=False)
+    monkeypatch.setattr(eg, "EVAL_DIR", d)
+    _, kind = eg.load()
+    assert kind == "human"

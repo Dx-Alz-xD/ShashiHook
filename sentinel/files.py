@@ -76,6 +76,10 @@ class AttachmentFile:
     archive_contents: list[str] = field(default_factory=list)
     archive_hides_executable: bool = False
     notes: list[str] = field(default_factory=list)
+    # Populated for Windows executables: section entropy and where it sits
+    # against ordinary Windows binaries. See sentinel/pe.py for why this is a
+    # percentile rather than a score.
+    pe: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -133,6 +137,19 @@ def from_message(msg: Message) -> list[AttachmentFile]:
                            f"{real} -- the extension is a claim, the magic bytes are not")
         if is_exec:
             a.notes.append(f"is a {real} and will run if opened")
+        # Entropy is a fact about the bytes, unlike the classifier trained on
+        # this dataset, which separates collections rather than behaviour.
+        if data[:2] == b"MZ":
+            from .pe import parse as parse_pe, rank as rank_entropy
+            h = parse_pe(data)
+            if h.ok:
+                pct, sentence = rank_entropy(h.max_entropy)
+                a.pe = h.to_dict()
+                a.pe["entropy_percentile"] = pct
+                a.pe["entropy_note"] = sentence
+                if sentence:
+                    a.notes.append(sentence)
+                a.notes.extend(h.notes)
         if a.archive_hides_executable:
             inner = [n for n in a.archive_contents
                      if Path(n).suffix.lower() in EXECUTABLE_INSIDE]
@@ -305,45 +322,24 @@ def _running_from(path: Path) -> bool:
 
 
 # --------------------------------------------------------------- PE verdict
-_PE_MODEL = None
-_PE_FEATURES: list[str] = []
+# `pe_score()` lived here and loaded artifacts/pe_model.txt. It has been
+# removed rather than left looking usable.
+#
+# The model reached 0.9998 ROC-AUC and never ran on a single real file: nothing
+# in this codebase ever produced the 54 header fields it wanted. Auditing it
+# explained why that was a mercy. Its two classes come from different
+# collections -- Windows program files against a VirusShare dump -- so its
+# strongest features separate the collections, not the behaviour. Dropping all
+# nineteen build-environment fields moved held-out AUC by 0.0001, because the
+# contamination is in everything.
+#
+# What replaced it is sentinel/pe.py: a header parser that works on real
+# attachments, and section entropy expressed as a percentile against ordinary
+# Windows binaries. Entropy is a property of the bytes rather than of whoever
+# collected them, which is the whole difference.
+#
+# `file_features()` and FILE_FEATURE_NAMES went with it. They were never
+# imported either; the attachment features the model actually uses are the six
+# att_* fields built in features/extractor.py.
 
 
-def pe_score(header_features: dict) -> tuple[float, str]:
-    """Static-PE maliciousness, with the caveat attached to every use.
-
-    Measured on the bundled dataset this reaches 0.9998 ROC-AUC, and that
-    number is misleading. ImageBase alone reaches 0.938 on the same data
-    because 99% of its malicious samples use 0x400000 against 12% of the
-    legitimate ones -- the default for older 32-bit toolchains. A large part of
-    the separation is compiler era, not intent. Treated here as one weak
-    opinion alongside VirusTotal, never as a verdict.
-    """
-    global _PE_MODEL, _PE_FEATURES
-    import lightgbm as lgb
-    if _PE_MODEL is None:
-        mp = ARTIFACTS / "pe_model.txt"
-        fp = ARTIFACTS / "pe_model_features.json"
-        if not (mp.exists() and fp.exists()):
-            return 0.0, "no PE model trained"
-        _PE_MODEL = lgb.Booster(model_file=str(mp))
-        _PE_FEATURES = json.loads(fp.read_text())
-    import numpy as np
-    x = np.array([[float(header_features.get(k, 0) or 0) for k in _PE_FEATURES]],
-                 dtype=np.float32)
-    p = float(_PE_MODEL.predict(x)[0])
-    return p, (f"static PE model scores {p:.2f} — header layout only, and this "
-               f"model's training data separates largely on compiler era, so "
-               f"treat it as a weak signal beside a hash lookup")
-
-
-def file_features(atts: list[AttachmentFile]) -> dict[str, float]:
-    return {
-        "fil_count": float(len(atts)),
-        "fil_executable": float(any(a.executable for a in atts)),
-        "fil_type_mismatch": float(any(a.type_mismatch for a in atts)),
-        "fil_archive_hides_exe": float(any(a.archive_hides_executable for a in atts)),
-    }
-
-
-FILE_FEATURE_NAMES = tuple(file_features([]).keys())

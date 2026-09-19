@@ -195,6 +195,10 @@ async function openDetail(id, rowNodeRef) {
     anime({ targets: el, width: `${el.dataset.w}%`, duration: 620,
             delay: 180, easing: "easeOutCubic" });
   });
+  const lnBtn = panel.querySelector("#to-learner");
+  if (lnBtn) {
+    lnBtn.addEventListener("click", () => learnerOpen(lnBtn.dataset.mid));
+  }
   if ((d.card?.score ?? 0) >= window.__profileMin) {
     loadGraph(id);
     loadTrajectory(id);
@@ -267,8 +271,7 @@ function renderProfile(slot, p, id) {
 
   if (!p.ok) {
     slot.innerHTML = `<h3>Threat profile</h3>
-      <p class="note">${p.skipped ? esc(p.error)
-                                  : "Unavailable — " + esc(p.error || "no provider answered")}</p>
+      <p class="note">${p.skipped ? esc(p.error) : esc(llmDown(p.error))}</p>
       <button class="btn ghost" id="profile-anyway" style="margin-top:9px">
         ${p.skipped ? "Profile it anyway" : "Retry"}</button>`;
     $("#profile-anyway")?.addEventListener("click", () => loadProfile(id, true));
@@ -445,6 +448,17 @@ function renderDetail(panel, d) {
   // that passed is a result, and showing a bare 0 instead tells the reader
   // neither what was examined nor what the number would have meant.
   h += renderChecks(d);
+
+  // Learner entry point. Sits with the evidence rather than in the toolbar,
+  // because the lesson is about THIS message and the reader is looking at it.
+  h += `<div class="sec ln-cta">
+      <div>
+        <h3 style="margin:0 0 4px">Learn to spot this one yourself</h3>
+        <p class="note" style="margin:0">Questions written from the evidence
+           above, aimed at the tells you have been missing.</p>
+      </div>
+      <button class="btn" id="to-learner" data-mid="${esc(c.id)}">View in Learner</button>
+    </div>`;
 
   // Filled in by loadTrajectory / loadDrill once the provider answers. The
   // slots exist up front so the panel does not reflow under the reader when
@@ -883,7 +897,7 @@ async function loadTrajectory(id) {
   if (slot.dataset.owner !== id) return;
   if (!t.ok) {
     slot.innerHTML = `<h3>If you had replied</h3>
-      <p class="note">${esc(t.error || "unavailable")}</p>`;
+      <p class="note">${esc(llmDown(t.error))}</p>`;
     return;
   }
   let h = `<h3>If you had replied</h3>
@@ -927,7 +941,7 @@ async function loadDrill(id) {
   if (slot.dataset.owner !== id) return;
   if (!d.ok) {
     slot.innerHTML = `<h3>Practice on this one</h3>
-      <p class="note">${esc(d.error || "unavailable")}</p>`;
+      <p class="note">${esc(llmDown(d.error))}</p>`;
     return;
   }
   let h = `<h3>Practice on this one</h3>
@@ -976,3 +990,61 @@ async function loadDrill(id) {
   anime({ targets: slot.querySelectorAll(".dq"), translateY: [10, 0],
           delay: anime.stagger(60), duration: 340, easing: "easeOutCubic" });
 }
+
+// ------------------------------------------------------------- account menu
+// The console is otherwise a room with no door: signed in, with no indication
+// of which mailbox is being read and no way to sign out.
+(function () {
+  "use strict";
+  const btn = document.getElementById("acct-btn");
+  const menu = document.getElementById("acct-menu");
+  if (!btn || !menu) return;
+
+  fetch("/api/auth/me", { credentials: "same-origin" })
+    .then((r) => r.json())
+    .then((d) => {
+      if (!d.signed_in) { window.location.href = "/login"; return; }
+      const u = d.user;
+      const name = u.display_name || u.email.split("@")[0];
+      document.getElementById("acct-name").textContent = name;
+      document.getElementById("acct-av").textContent = name.slice(0, 1);
+      document.getElementById("acct-email").textContent = u.email;
+      const mbx = document.getElementById("acct-mbx");
+      mbx.textContent = u.has_mailbox
+        ? `reading ${u.imap_user}`
+        : "no mailbox connected";
+      if (u.is_demo) {
+        mbx.insertAdjacentHTML("beforeend",
+          '<br><span class="acct-demo">shared demo account</span>');
+      }
+    })
+    .catch(() => {});
+
+  function close() {
+    menu.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const opening = menu.hidden;
+    menu.hidden = !opening;
+    btn.setAttribute("aria-expanded", String(opening));
+    if (opening && typeof anime !== "undefined") {
+      anime({ targets: menu, scaleY: [0.9, 1], translateY: [-4, 0],
+              duration: 170, easing: "easeOutCubic" });
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!menu.hidden && !menu.contains(e.target)) close();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") close();
+  });
+
+  document.getElementById("acct-out").addEventListener("click", async () => {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+    window.location.href = "/";
+  });
+})();

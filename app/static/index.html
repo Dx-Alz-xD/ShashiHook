@@ -11,16 +11,18 @@
 <div class="app">
 
   <div class="titlebar">
-    <div class="logo">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"
-           stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-      </svg>
-    </div>
-    <div class="brand" style="min-width:0">
-      <h1>ShashiHook</h1>
-      <span class="by">engine <span class="engine">ArnosAI</span></span>
-    </div>
+    <a class="brand-link" href="/home" title="ShashiHook home">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <div class="brand" style="min-width:0">
+        <h1>ShashiHook</h1>
+        <span class="by">engine <span class="engine">ArnosAI</span></span>
+      </div>
+    </a>
     <div class="spacer"></div>
     <span class="pill" id="pill-engine"><span class="dot off" id="dot-engine"></span><span id="engine-txt">starting…</span></span>
     <span class="pill" id="pill-llm" style="display:none"><span class="dot off" id="dot-llm"></span><span id="llm-txt">llm</span></span>
@@ -30,6 +32,29 @@
         <path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>
       </svg>
     </button>
+
+    <!-- Account. Without this the console is a room with no door: signed in,
+         no way to see which mailbox is being read, and no way out. -->
+    <div class="acct">
+      <button class="acct-btn" id="acct-btn" aria-haspopup="menu" aria-expanded="false">
+        <span class="acct-av" id="acct-av">–</span>
+        <span class="acct-name" id="acct-name">account</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="acct-menu" id="acct-menu" role="menu" hidden>
+        <div class="acct-head">
+          <div class="acct-email" id="acct-email"></div>
+          <div class="acct-mbx" id="acct-mbx"></div>
+        </div>
+        <a role="menuitem" href="/settings">Settings &amp; mailbox</a>
+        <a role="menuitem" href="/about">About ShashiHook</a>
+        <a role="menuitem" href="/privacy">Privacy</a>
+        <a role="menuitem" href="/terms">Terms</a>
+        <div class="acct-sep"></div>
+        <button role="menuitem" id="acct-out" class="acct-danger">Sign out</button>
+      </div>
+    </div>
   </div>
 
   <div class="toolbar">
@@ -61,6 +86,7 @@
     <button class="btn ghost" id="architecture">Architecture</button>
     <button class="btn ghost" id="campaigns">Campaigns</button>
     <button class="btn ghost" id="playground">Playground</button>
+    <button class="btn ghost" id="learner">Learner</button>
     <button class="btn ghost" id="sort">Sort: severity</button>
   </div>
 
@@ -99,6 +125,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
 <script src="/static/graph.js"></script>
 <script src="/static/playground.js"></script>
+<script src="/static/learner.js"></script>
 <script src="/static/campaigns.js"></script>
 <script src="/static/architecture.js"></script>
 <script src="/static/app.js"></script>

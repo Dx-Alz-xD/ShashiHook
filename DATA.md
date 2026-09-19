@@ -217,3 +217,43 @@ other-sender mail did.
 Build profiles with `scripts/build_style_profiles.py`; the watch daemon then
 keeps them current, learning only from mail it has already cleared so that a
 suspected impersonation cannot drag the baseline towards the attacker.
+
+## The Learner
+
+Five practice modes. Four are graded without a language model, because each is
+graded against something already known to be true.
+
+| mode | what it asks | graded on |
+|---|---|---|
+| Lesson | written questions about one of your own messages | model, grounded in ArnosAI's evidence |
+| Is it hostile? | one corpus message, hostile or not | corpus label |
+| Twin test | two look-alike messages, which is the scam | corpus label |
+| Find the tell | click the phrase that gives it away | exact lexicon spans |
+| Timed triage | sort a stream against a clock | corpus label |
+
+**Only the binary label is used as an answer key.** The vector label — which
+*kind* of attack — is derived from weak rules and measures about 68% against
+independent labels, so grading a learner on it would mark correct answers wrong
+roughly a third of the time.
+
+**The pool** (`scripts/build_practice_pool.py`) draws 1,800 messages from the
+training split: 900 benign, 900 malicious of which **720 carry a usable tell**.
+A blind sample gave only 194, because most corpus spam is old pharma
+advertising that matches no manipulation lexicon, so malicious messages are
+sampled span-aware.
+
+**Twins** are the interesting part. For each scam the similarity index finds the
+*benign* message it most resembles — pharma spam sits at 0.89 cosine to a
+legitimate course-sale email, because both are built on "limited time offer".
+320 pairs at 0.64–0.97. Training that only shows lurid fakes teaches "scams look
+weird", which is the belief a competent attacker relies on.
+
+**Adaptation** is deterministic, not a request. `available_tactics()` computes
+which of the ten tactic families a given message can actually demonstrate, and
+the lesson prompt is required to cover the overlap with what the learner keeps
+missing. Asking a model to "weight towards weak tactics" was tried first and
+ignored both weak spots on a message that plainly showed one.
+
+Progress lives in `artifacts/learners.json`, chmod 600 — what someone is
+learning is personal. Every mode feeds the same profile, so missing urgency in
+the timed triage changes the questions in the next written lesson.

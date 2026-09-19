@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About — ShashiHook</title>
+<meta name="description" content="How ShashiHook works, what it measures, and what it deliberately does not do.">
+<meta property="og:title" content="About — ShashiHook">
+<meta property="og:description" content="How ShashiHook works, what it measures, and what it deliberately does not do.">
+<meta name="theme-color" content="#050609">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><circle cx=%2216%22 cy=%2216%22 r=%2210%22 fill=%22%237c6cff%22/></svg>">
+<link rel="stylesheet" href="/static/site.css">
+</head><body>
+<nav class="nav"><div class="nav-inner">
+  <a class="brand" href="/home"><span class="brand-dot"></span>ShashiHook<small>ArnosAI</small></a>
+  <div class="nav-links">
+    <a href="/about" class="hide-sm">About</a>
+    <a href="/agents" class="hide-sm">For agents</a>
+    <a href="/privacy" class="hide-sm">Privacy</a>
+    <span id="navauth"><a href="/login">Sign in</a></span>
+  </div>
+</div></nav>
+<div class="wrap narrow prose">
+  <h2>About ShashiHook</h2>
+  <p class="updated">Engine: ArnosAI</p>
+
+  <p>ShashiHook reads a mailbox and explains what it finds. The design goal was never
+     a higher accuracy number — it was that a person reading a verdict can check it.</p>
+
+  <h3>How a message is scored</h3>
+  <p>Two models run in parallel: one over 163 structural features, one over the wording.
+     An explicit blender combines them. They are kept separate rather than stacked so
+     that SHAP attribution stays faithful — a stacked model's explanation describes the
+     stack, not the evidence.</p>
+  <p>On top of that sit <strong>32 deterministic rules</strong>. Each one encodes a
+     detection precise enough to set a floor the model cannot pull below, and each was
+     validated against 15,103 held-out messages before it was allowed to fire.</p>
+  <p>The probability is then re-expressed for the base rate where it is deployed. A model
+     trained on a corpus that is 49% malicious will call an ordinary inbox a disaster
+     unless you correct for that; doing so took false positives on a real mailbox from
+     69 in 150 to 0 in 150.</p>
+
+  <h3>Severity is declared, not learned</h3>
+  <p>No corpus carries severity labels, so inventing a learned severity would be
+     inventing a number. Instead there is a published rubric:</p>
+  <p><code>100 × intent × (0.50·impact + 0.30·exploitability + 0.20·targeting) + escalators</code></p>
+  <p>Every message shows its own arithmetic with the values substituted in.</p>
+
+  <h3>What it deliberately does not do</h3>
+  <table>
+    <tr><th>Built</th><th>Measured</th><th>Decision</th></tr>
+    <tr><td>URL classifier</td><td>0.985 AUC held out, 93% false positives on real mail</td><td>Not wired in</td></tr>
+    <tr><td>PE malware classifier</td><td>0.9998 AUC — classes came from different collections</td><td>Removed</td></tr>
+    <tr><td>Job-scam classifier</td><td>0.99 AUC — learned job categories, not deception</td><td>Not used</td></tr>
+  </table>
+  <p>Those datasets were kept as measuring instruments instead. The malware corpus now
+     supplies an entropy baseline, so an attachment can be reported as
+     <em>"higher entropy than 99.5% of legitimate Windows binaries"</em> rather than a
+     number nobody can interrogate.</p>
+
+  <div class="callout"><p><strong>The language model cannot move a score.</strong>
+     Gemini and Groq write explanations, translate foreign mail and read images. The
+     verdict, severity and attack vector come from measurable evidence. If a model could
+     move the number, an attacker who writes well could argue their way past the filter.</p></div>
+
+  <h3>Where the analysis runs</h3>
+  <p>The engine is Python — LightGBM, SHAP, scikit-learn — and runs on the machine serving
+     this page. Mail is fetched directly from your provider. The only outbound calls are
+     to your mail server, and to a language model when you ask for a written explanation.</p>
+</div>
+<footer><div class="foot-inner">
+  <span>ShashiHook — engine ArnosAI. Analysis runs on your machine.</span>
+  <div class="foot-links">
+    <a href="/about">About</a><a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a><a href="/agents">Agents</a>
+    <a href="/robots.txt">robots.txt</a>
+  </div>
+</div></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+<script src="/static/site.js"></script>
+</body></html>
